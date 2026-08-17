@@ -37,6 +37,8 @@ export interface Row {
   sourcePages: number[]
   /** 사람이 손대야 하는 칸. 값이 없거나 근거가 약한 필드명이 들어간다. */
   needsReview: string[]
+  /** 각 값의 출처. 'table' 은 인보이스에 없어서 매핑으로 채웠다는 뜻이다. */
+  sources: Record<string, 'document' | 'table' | 'none'>
   /** 사용자가 직접 고친 필드명. 재추출해도 덮어쓰지 않는다. */
   editedFields: string[]
 }

@@ -40,37 +40,50 @@ export function normalize(raw: any, master: Master): NormalizeResult {
       const id = `${invId}-r${j + 1}`
       const needs = new Set<string>(Array.isArray(r.needs_review) ? r.needs_review : [])
 
+      // 추출기가 각 필드마다 "문서에서 읽었는지 / 표에서 채웠는지"를 같이 준다.
+      // 문서에서 읽은 값은 매핑이 덮어쓰지 않는다. 종이가 정본이다.
+      const src = (f: string): 'document' | 'table' | 'none' => r.source?.[f] ?? 'table'
+
       const rawVendor = String(r.vendor_name ?? '').trim()
       const vendor = byName.get(key(rawVendor))
 
-      // 마스터에 있으면 시트 표기를 정본으로 삼는다 (쉼표·마침표까지).
+      // 벤더는 문서에서 읽되, 아는 거래처면 표기만 시트 정본으로 통일한다
+      // (같은 거래처가 'Supply, Inc' / 'Supply Inc' 로 갈리면 집계가 깨진다).
       const vendorName = vendor?.canonicalName ?? rawVendor
       if (!vendor && rawVendor) needs.add('vendorName')
 
-      // 문서에 카드가 찍혀 있으면 그게 가장 확실한 증거다. 벤더 기본값보다 우선한다.
-      // (같은 벤더라도 그날 카드로 긁었을 수 있고, 영수증은 거짓말하지 않는다.)
       const claimed = String(r.payment ?? '').trim().toUpperCase() as Payment | ''
       const rawCard = String(r.card_id ?? '').trim()
       const last4 = rawCard.match(/(\d{4})\s*$/)?.[1]
-      const cardEvidence = claimed === 'CARD' && !!last4
 
-      const payment: Payment | '' = cardEvidence ? 'CARD' : vendor?.payment || claimed || ''
+      // 문서가 결제수단을 말하고 있으면 그대로 쓴다. 아니면 그때 표를 본다.
+      const payment: Payment | '' =
+        src('payment') === 'document' && claimed
+          ? claimed
+          : vendor?.payment || claimed || ''
       if (!payment) needs.add('payment')
 
       let cardId = ''
       if (payment === 'CARD') {
+        // 영수증에 찍힌 끝 4자리 > 표의 기본 카드
         cardId = (last4 && cardByLast4.get(last4)) || rawCard || vendor?.defaultCardId || ''
-        // 매핑에 없는 카드 번호는 사람이 확인해야 한다.
         if (!cardId || (last4 && !cardByLast4.has(last4) && !vendor?.defaultCardId)) {
           needs.add('cardId')
         }
       }
 
-      const coa = validCoa.has(String(r.coa ?? '')) ? String(r.coa) : vendor?.defaultCoa || ''
+      // 품목으로 판단한 COA 가 허용값이면 그걸 쓰고, 애매할 때만 벤더 기본값.
+      const claimedCoa = String(r.coa ?? '')
+      const coa =
+        validCoa.has(claimedCoa) && (src('coa') === 'document' || !vendor?.defaultCoa)
+          ? claimedCoa
+          : vendor?.defaultCoa || (validCoa.has(claimedCoa) ? claimedCoa : '')
       if (!coa || !validCoa.has(coa)) needs.add('coa')
 
-      const location = String(r.location ?? '').trim().toUpperCase()
-      if (!location || !validLoc.has(location)) needs.add('location')
+      // 지점은 근거가 있을 때만 인정한다. 표에는 지점을 추론할 근거가 없다.
+      const rawLoc = String(r.location ?? '').trim().toUpperCase()
+      const location = src('location') === 'document' && validLoc.has(rawLoc) ? rawLoc : ''
+      if (!location) needs.add('location')
 
       const amount = Number(r.amount)
       if (!Number.isFinite(amount) || amount === 0) needs.add('amount')
@@ -94,6 +107,16 @@ export function normalize(raw: any, master: Master): NormalizeResult {
         memo: String(r.memo ?? ''),
         sourcePages: (inv.source_pages ?? []).map(Number),
         needsReview: [...needs],
+        sources: {
+          vendorName: rawVendor ? 'document' : 'none',
+          date: 'document',
+          invoiceNumber: 'document',
+          amount: 'document',
+          payment: payment ? (src('payment') === 'document' && claimed ? 'document' : 'table') : 'none',
+          cardId: cardId ? (last4 && cardByLast4.has(last4) ? 'document' : 'table') : 'none',
+          coa: coa ? (coa === claimedCoa && src('coa') === 'document' ? 'document' : 'table') : 'none',
+          location: location ? 'document' : 'none',
+        },
         editedFields: [],
       })
       rowIds.push(id)

@@ -256,3 +256,25 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 인보이스가 아니라 매핑 기준표에서 채운 값 */
+.sheet td.from-table input { color: #a5b4fc; font-style: italic; }
+.sheet td.from-table::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: repeating-linear-gradient(to bottom, #6366f1 0 3px, transparent 3px 6px);
+}
+.sheet td { position: relative; }
+
+.legend {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  margin: 0 4px 0 10px;
+  vertical-align: -1px;
+}
+.legend.review { background: rgba(245, 158, 11, 0.6); }
+.legend.table { background: #6366f1; }
+.legend.edited { background: var(--accent); }

@@ -280,9 +280,11 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
                   />
                 </td>
                 {COLS.map((c) => {
+                  const fromTable = r.sources?.[c.key] === 'table' && !r.editedFields.includes(c.key)
                   const cls = [
                     c.kind === 'num' ? 'num' : '',
                     r.needsReview.includes(c.key) ? 'review' : r.editedFields.includes(c.key) ? 'edited' : '',
+                    fromTable ? 'from-table' : '',
                   ].filter(Boolean).join(' ')
 
                   if (c.kind === 'readonly') {
@@ -311,6 +313,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
                         className={c.key === 'invoiceNumber' ? 'mono' : undefined}
                         value={c.get(r)}
                         placeholder={r.needsReview.includes(c.key) ? '확인 필요' : ''}
+                        title={fromTable ? '인보이스에 없어서 매핑 기준표에서 채운 값입니다' : undefined}
                         onChange={(ev) => edit(r.id, c, ev.target.value)}
                       />
                     </td>
@@ -341,6 +344,11 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
       <div className="small muted" style={{ marginTop: 6 }}>
         왼쪽 체크박스로 행 선택 · Shift+클릭으로 여러 행 한 번에 · 아무것도 선택 안 하면 보이는 행
         전체가 대상입니다 · 목록에 없는 값은 칸에 직접 입력하면 됩니다
+        <span style={{ marginLeft: 10 }}>
+          <span className="legend review" /> 확인 필요
+          <span className="legend table" /> 매핑에서 채움
+          <span className="legend edited" /> 직접 수정
+        </span>
       </div>
 
       {focusPages && pagePreviews && (

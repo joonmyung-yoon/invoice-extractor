@@ -30,6 +30,21 @@ in page order. Read EVERY page image with the Read tool. Do not skip any, and do
    "3040-33", amount 457.98/633.91/124.58. The split amounts must sum to the printed total —
    check this and report the result in "split_check".
 
+## The document comes first
+
+**Read the value off the document whenever the document says it.** The tables below are a
+fallback for facts the paper genuinely does not carry — not a shortcut to skip reading.
+
+For every field also report **where the value came from**, so a human can tell an observed
+fact from a filled-in default:
+
+- \`"document"\` — you read it on the page (printed or handwritten)
+- \`"table"\` — the page does not say it; you took it from the tables below
+- \`"none"\` — neither; the field is left empty for a human
+
+If the document and a table disagree about something the document actually states
+(a card number, an amount, a date, an invoice number), **the document wins.**
+
 {{MASTER}}
 
 ## Field rules
@@ -42,29 +57,30 @@ in page order. Read EVERY page image with the Read tool. Do not skip any, and do
   one of its aliases. Copy the spelling from the table character for character, including
   commas and periods. Only invent a name when the vendor is genuinely not in the table.
 - **amount** — number with 2 decimals, no currency symbol, no thousands separator.
-- **payment** — decide in this order:
+- **payment** — read the page first:
 
-  1. **The document shows a card was charged** → \`CARD\`. Look for a masked card number
-     (\`XXXXXXXXXXXX3312\`), \`APPROVED\`, \`AID:\`, \`Seq#\`, \`App#\`, or a card brand
-     (\`Costco Visa\`, \`MASTERCARD\`, \`AMEX\`, \`DEBIT\`). This is reliable evidence — trust it
-     even if the Vendors table says otherwise, and put the **last 4 digits** in card_id.
-  2. **Payment terms say \`C.O.D\` / \`COD\` / \`Cash on Delivery\`** → \`CHECK\`.
-     (Paid at delivery; this operation pays those by check.)
-  3. **Otherwise use the Vendors table.**
-  4. **Vendor not in the table and no card shown** → leave payment \`""\` and add
-     \`"payment"\` to needs_review.
+  1. **A card was charged on this page** → \`CARD\`, source \`"document"\`. Evidence: a masked
+     card number (\`XXXXXXXXXXXX3312\`), \`APPROVED\`, \`AID:\`, \`Seq#\`, \`App#\`, or a brand
+     (\`Costco Visa\`, \`MASTERCARD\`, \`AMEX\`, \`DEBIT\`). Also put the **last 4 digits** in card_id.
+  2. **Terms say \`C.O.D\` / \`COD\` / \`Cash on Delivery\`** → \`CHECK\`, source \`"document"\`.
+  3. **The page states a payment method in words** (\`PAID BY CHECK\`, \`CHECK #1234\`,
+     \`ACH\`, \`WIRE\`, \`EFT\`, \`AUTO DEBIT\`) → use it, source \`"document"\`.
+  4. Otherwise → Vendors table, source \`"table"\`.
+  5. Not in the table either → \`""\`, source \`"none"\`, add \`"payment"\` to needs_review.
 
-  ⚠️ Do NOT infer CHECK vs ACH from payment terms. \`Net 30\` appears on both ACH vendors
-  (Sysco) and CHECK vendors (Wang Globalnet) — the terms carry no information about which
-  one this operation uses. Only the Vendors table knows. Guessing here silently corrupts
-  the books.
+  ⚠️ Never infer CHECK vs ACH from payment terms. \`Net 30\` appears on an ACH vendor (Sysco)
+  and on a CHECK vendor (Wang Globalnet) in the very same batch — the terms carry no
+  information about which one is used. If the page does not say the method in words, that is
+  a \`"table"\` answer, not a \`"document"\` one. Do not dress up a guess as an observation.
 
-- **card_id** — only when payment is \`CARD\`. Read the masked card's last 4 digits and look
-  them up in the Cards table. If the document shows no card number (delivery invoices often
-  don't), fall back to the vendor's default_card_id. Leave empty for CHECK/ACH.
+- **card_id** — read the masked card's last 4 digits off the page and look them up in the
+  Cards table (source \`"document"\`). Delivery invoices usually print no card number; then
+  fall back to the vendor's default_card_id (source \`"table"\`). Empty for CHECK/ACH.
 
-- **coa** — take from the Vendors table. If the vendor is unknown, pick the closest allowed
-  value from the item contents and add \`"coa"\` to needs_review.
+- **coa** — the item contents on the page are the real evidence. If the page is clearly meat,
+  produce, liquor, paper goods etc., choose the matching allowed value and mark
+  \`"document"\`. Use the vendor's default_coa only when the contents are unclear
+  (source \`"table"\`).
 - **location** — one of the codes in the Locations table. Evidence, strongest first:
 
   1. **Handwriting** naming a location (\`IFo - 3040-13  457.98\`). Most reliable.
@@ -107,6 +123,13 @@ Write \`extracted.json\` in the current directory:
           "card_id": "",
           "location": "",
           "memo": "",
+          "source": {
+            "vendor_name": "document",
+            "coa": "document",
+            "payment": "table",
+            "card_id": "none",
+            "location": "none"
+          },
           "needs_review": ["location"]
         }
       ]
