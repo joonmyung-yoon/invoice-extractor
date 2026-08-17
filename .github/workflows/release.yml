@@ -1,15 +1,30 @@
 name: Build & Release
 
-# 태그를 밀면 (예: git tag v0.1.1 && git push --tags) 맥·윈도우 설치 파일이
-# 자동으로 만들어져 GitHub Releases 에 올라간다.
-# "Actions" 탭에서 손으로 돌릴 수도 있다.
+# 태그를 밀면 (예: git tag v0.1.3 && git push --tags) 설치 파일이 만들어져
+# GitHub Releases 에 올라간다. Actions 탭에서 손으로 돌릴 수도 있다.
+#
+# 맥은 로컬에서 `npm run release:mac` 이 15초면 끝나므로, 수동 실행 때는
+# 기본적으로 윈도우만 만든다. 태그를 밀면 둘 다 만든다.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: '무엇을 빌드할지'
+        type: choice
+        default: windows
+        options: [windows, all]
 
 permissions:
   contents: write
+
+env:
+  # 증분 컴파일 산출물은 CI 에서 재사용되지 않는데 캐시만 크게 만든다.
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  # 경고를 에러로 올리지 않되, 백트레이스는 남긴다.
+  RUST_BACKTRACE: 1
 
 jobs:
   build:
@@ -17,21 +32,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            target: universal-apple-darwin
-            # 유니버설 바이너리는 두 아키텍처를 각각 빌드해 합치므로 둘 다 설치해야 한다.
-            toolchains: aarch64-apple-darwin,x86_64-apple-darwin
-            name: macOS (인텔 + 애플실리콘)
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             toolchains: x86_64-pc-windows-msvc
             name: Windows
+            always: true
+          - platform: macos-latest
+            target: universal-apple-darwin
+            # 유니버설은 두 아키텍처를 각각 컴파일해 합치므로 시간이 두 배 든다.
+            toolchains: aarch64-apple-darwin,x86_64-apple-darwin
+            name: macOS (인텔 + 애플실리콘)
+            always: false
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.platform }}
 
-    # 릴리스를 만들려면 GITHUB_TOKEN 에 쓰기 권한이 있어야 한다.
-    # 워크플로 상단에도 선언했지만, 조직/저장소 정책에 따라 잡 단위 선언이 필요한 경우가 있다.
+    # 수동 실행에서 windows 만 고른 경우 맥 잡은 건너뛴다.
+    if: >-
+      github.event_name != 'workflow_dispatch'
+      || inputs.platforms == 'all'
+      || matrix.always
+
     permissions:
       contents: write
 
@@ -53,22 +74,35 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          # 타겟이 다르면 캐시도 분리해야 서로 무효화하지 않는다.
+          key: ${{ matrix.target }}
+
+      # cargo 캐시가 비어 있는 첫 실행에서도 컴파일 결과를 재사용하게 해준다.
+      - name: sccache 설치
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: 의존성 설치
         run: npm ci
 
       # Tauri 는 컴파일 시점에 프런트엔드 산출물(dist/)이 있어야 한다.
-      # 테스트도 같은 크레이트를 컴파일하므로 먼저 만들어 둔다.
       - name: 프런트엔드 빌드
         run: npm run build
 
+      # 테스트는 dev 프로파일로 전체를 한 번 더 컴파일한다. 플랫폼 무관한 로직만
+      # 검증하므로 한 곳에서만 돌려 나머지 플랫폼의 시간을 아낀다.
       - name: 테스트
+        if: runner.os == 'macOS'
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: 'true'
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: 빌드 & 릴리스 업로드
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: 'true'
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
