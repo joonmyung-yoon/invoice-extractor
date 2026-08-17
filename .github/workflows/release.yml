@@ -1,6 +1,6 @@
 name: Build & Release
 
-# 태그를 밀면 (예: git tag v0.1.3 && git push --tags) 설치 파일이 만들어져
+# 태그를 밀면 (예: git tag v0.1.4 && git push --tags) 설치 파일이 만들어져
 # GitHub Releases 에 올라간다. Actions 탭에서 손으로 돌릴 수도 있다.
 #
 # 맥은 로컬에서 `npm run release:mac` 이 15초면 끝나므로, 수동 실행 때는
@@ -23,35 +23,58 @@ env:
   # 증분 컴파일 산출물은 CI 에서 재사용되지 않는데 캐시만 크게 만든다.
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
-  # 경고를 에러로 올리지 않되, 백트레이스는 남긴다.
   RUST_BACKTRACE: 1
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            toolchains: x86_64-pc-windows-msvc
-            name: Windows
-            always: true
-          - platform: macos-latest
-            target: universal-apple-darwin
-            # 유니버설은 두 아키텍처를 각각 컴파일해 합치므로 시간이 두 배 든다.
-            toolchains: aarch64-apple-darwin,x86_64-apple-darwin
-            name: macOS (인텔 + 애플실리콘)
-            always: false
+  # 잡 레벨 if 에서는 matrix 컨텍스트를 쓸 수 없다(매트릭스 전개 전에 평가된다).
+  # 그래서 어떤 플랫폼을 빌드할지 여기서 정해 매트릭스 자체를 만들어 넘긴다.
+  prepare:
+    name: 대상 결정
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          # 러너는 저장소 변수로 바꾼다
+          # (Settings > Secrets and variables > Actions > Variables).
+          #   RUNNER_WINDOWS = 예) warp-windows-latest-x64-8x
+          #   RUNNER_MACOS   = 예) warp-macos-latest-arm64-6x
+          # 비워두면 GitHub 기본 러너를 쓴다. 라벨이 틀리면 잡이 러너를 기다리며
+          # 멈추므로 WarpBuild 대시보드에 표시된 라벨을 그대로 넣어야 한다.
+          WIN_RUNNER: ${{ vars.RUNNER_WINDOWS || 'windows-latest' }}
+          MAC_RUNNER: ${{ vars.RUNNER_MACOS || 'macos-latest' }}
+          WANT: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'all' }}
+        run: |
+          win=$(jq -nc --arg r "$WIN_RUNNER" '{
+            platform: $r,
+            target: "x86_64-pc-windows-msvc",
+            toolchains: "x86_64-pc-windows-msvc",
+            name: "Windows"
+          }')
+          mac=$(jq -nc --arg r "$MAC_RUNNER" '{
+            platform: $r,
+            target: "universal-apple-darwin",
+            toolchains: "aarch64-apple-darwin,x86_64-apple-darwin",
+            name: "macOS"
+          }')
 
+          if [ "$WANT" = "all" ]; then
+            matrix=$(jq -nc --argjson w "$win" --argjson m "$mac" '{include: [$w, $m]}')
+          else
+            matrix=$(jq -nc --argjson w "$win" '{include: [$w]}')
+          fi
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "빌드 대상: $matrix"
+
+  build:
+    needs: prepare
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.platform }}
-
-    # 수동 실행에서 windows 만 고른 경우 맥 잡은 건너뛴다.
-    if: >-
-      github.event_name != 'workflow_dispatch'
-      || inputs.platforms == 'all'
-      || matrix.always
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
 
     permissions:
       contents: write
