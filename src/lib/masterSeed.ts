@@ -41,7 +41,7 @@ export const MASTER_SEED: Master = {
     { canonicalName: 'Apex Mongr Inc', aliases: [], payment: 'CHECK', defaultCardId: '', defaultCoa: 'COGS:Meat Products', notes: '' },
     { canonicalName: 'Sysco', aliases: ['SYSCO LOS ANGELES, INC.', 'ASIAN FOODS'], payment: 'ACH', defaultCardId: '', defaultCoa: 'COGS:Food Cost', notes: '여러 장짜리 인보이스. 총액은 LAST PAGE 에만 있음' },
     { canonicalName: 'Dream Factory Supply, Inc', aliases: ['Dream Factory Supply Inc'], payment: 'CHECK', defaultCardId: '', defaultCoa: 'COGS:Supplies', notes: '' },
-    { canonicalName: 'S.J. Distributors Inc.', aliases: ['SJ Distributors', 'S.J. Distributors Inc'], payment: 'CARD', defaultCardId: 'SCR-0463', defaultCoa: 'COGS:Food Cost', notes: '납품 인보이스에 카드번호가 안 찍히므로 기본 카드 사용' },
+    { canonicalName: 'S.J. Distributors Inc.', aliases: ['SJ Distributors', 'S.J. Distributors Inc', 'S.J. Distributors LLC'], payment: 'CARD', defaultCardId: 'SCR-0463', defaultCoa: 'COGS:Food Cost', notes: '납품 인보이스에 카드번호가 안 찍히므로 기본 카드 사용' },
     { canonicalName: 'Wang Globalnet', aliases: [], payment: 'CHECK', defaultCardId: '', defaultCoa: 'COGS:Food Cost', notes: '' },
     { canonicalName: 'AMAZON', aliases: ['Amazon.com', 'AMZN'], payment: 'CARD', defaultCardId: 'SCR-9555', defaultCoa: 'COGS:Supplies', notes: '' },
     { canonicalName: 'J&B Distribution Services Corp', aliases: [], payment: 'CHECK', defaultCardId: '', defaultCoa: 'COGS:Food Cost', notes: '' },
