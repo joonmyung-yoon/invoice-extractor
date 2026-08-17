@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.DS_Store
+# 서비스 계정 키는 저장소에 절대 들어가면 안 된다.
+*.service-account.json
+*-key.json
+
+# 배포 산출물 (용량이 커서 저장소에 넣지 않는다)
+release/*.dmg

@@ -1,0 +1,22 @@
+canonical_name	aliases	payment	default_card_id	default_coa	notes
+Greenland Foods Company		CHECK		COGS:Food Cost	
+COSTCO	COSTCO WHOLESALE	CARD	SCR-3312	COGS:Food Cost	영수증 하단 손글씨로 지점 분할되는 경우가 많음
+Apex Mongr Inc		CHECK		COGS:Meat Products	
+Sysco	SYSCO LOS ANGELES, INC.|ASIAN FOODS	ACH		COGS:Food Cost	여러 장짜리 인보이스, 총액은 LAST PAGE 에만 있음
+Dream Factory Supply, Inc	Dream Factory Supply Inc	CHECK		COGS:Supplies	
+S.J. Distributors Inc.	S.J. Distributors Inc|SJ Distributors	CARD	SCR-0463	COGS:Food Cost	납품 인보이스에 카드번호가 안 찍히므로 기본 카드 사용
+Wang Globalnet		CHECK		COGS:Food Cost	
+AMAZON	Amazon.com|AMZN	CARD	SCR-9555	COGS:Supplies	
+J&B Distribution Services Corp		CHECK		COGS:Food Cost	
+USFOODS	US FOODS|U.S. FOODS	ACH		COGS:Food Cost	
+Woo Kee Inc. Co		CHECK		COGS:Food Cost	
+Chefs Warehouse	Chef's Warehouse	CARD	SCR-0738	COGS:Food Cost	
+American KGP. Inc.	American KGP Inc	CARD	SCR-0738	COGS:Food Cost	
+TARGET		CARD	SCR-0463	COGS:Supplies	
+K P Global Inc	KP Global	ACH		COGS:Liquor Cost	
+ZOOMAK		CARD	SCR-0463	Fringe Benefit:Employee Meals	
+Yosemite Valley Beef Distributors		CHECK		COGS:Meat Products	
+SPEEDWAY EXPRESS		CARD	SCR-0463	Fringe Benefit:Transp/Housing	
+WALMART	Wal-Mart	CARD	SCR-0463	COGS:Supplies	
+DPOT		CARD	SCR-0463	Fringe Benefit:Employee Meals	
+Oil Stop	Oilstop|Oilstop Drive Thru Oil Change	CARD	SCR-0463	Fringe Benefit:Transp/Housing	

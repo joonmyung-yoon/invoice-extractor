@@ -1,0 +1,32 @@
+{
+  "name": "invoice-extractor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "release:mac": "tauri build --target universal-apple-darwin --bundles app,dmg && mkdir -p release && cp \"src-tauri/target/universal-apple-darwin/release/bundle/dmg/Invoice Extractor_0.1.0_universal.dmg\" release/"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@tauri-apps/plugin-opener": "^2.2.5",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.7",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}

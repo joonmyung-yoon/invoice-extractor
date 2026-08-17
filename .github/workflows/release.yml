@@ -1,0 +1,85 @@
+name: Build & Release
+
+# 태그를 밀면 (예: git tag v0.1.1 && git push --tags) 맥·윈도우 설치 파일이
+# 자동으로 만들어져 GitHub Releases 에 올라간다.
+# "Actions" 탭에서 손으로 돌릴 수도 있다.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+            # 유니버설 바이너리는 두 아키텍처를 각각 빌드해 합치므로 둘 다 설치해야 한다.
+            toolchains: aarch64-apple-darwin,x86_64-apple-darwin
+            name: macOS (인텔 + 애플실리콘)
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            toolchains: x86_64-pc-windows-msvc
+            name: Windows
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Rust 설치
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.toolchains }}
+
+      - name: Rust 빌드 캐시
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 테스트
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: 빌드 & 릴리스 업로드
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          releaseName: 'Invoice Extractor ${{ github.ref_type == ''tag'' && github.ref_name || github.run_number }}'
+          releaseBody: |
+            ## 설치 방법
+
+            **macOS** — `.dmg` 를 받아 앱을 응용 프로그램으로 옮긴 뒤,
+            **우클릭 → 열기** 로 처음 한 번 실행하세요.
+            (Apple 개발자 인증서로 서명되어 있지 않아 더블클릭으로는 열리지 않습니다.)
+
+            "손상되었습니다" 가 뜨면 터미널에서:
+            ```
+            xattr -dr com.apple.quarantine "/Applications/Invoice Extractor.app"
+            ```
+
+            **Windows** — `.msi` 또는 `.exe` 를 실행하세요.
+            "Windows에서 PC를 보호했습니다" 가 뜨면 **추가 정보 → 실행**.
+
+            ---
+            ⚠️ 이 앱은 그 PC에 설치되어 로그인된 **Claude Code** 를 사용합니다.
+            먼저 `claude --version` 이 동작하는지 확인하세요.
+          releaseDraft: false
+          prerelease: false
