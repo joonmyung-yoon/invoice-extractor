@@ -328,7 +328,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
       ))}
 
       {mode === 'review' && focusRow && (
-        <div className="review">
+        <div className="reviewmode">
           <div className="rpane">
             <div className="row" style={{ marginBottom: 8 }}>
               <button

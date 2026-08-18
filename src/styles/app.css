@@ -407,35 +407,36 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
 }
 
 /* ── 검토 모드: 한 건씩 원본과 대조 ── */
+/* 클래스 이름은 .legend.review 같은 다른 요소와 겹치지 않게 고유해야 한다 */
 
-.review {
+.reviewmode {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 10px;
   height: calc(100vh - 190px);
   min-height: 460px;
 }
-.review .rpane {
+.reviewmode .rpane {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
   padding: 12px;
 }
-.review .rfield { margin-bottom: 9px; }
-.review .rfield label {
+.reviewmode .rfield { margin-bottom: 9px; }
+.reviewmode .rfield label {
   display: block;
   font-size: 11px;
   color: var(--muted);
   margin-bottom: 3px;
 }
-.review .rfield label.need { color: var(--warn); font-weight: 600; }
-.review .rfield input.need, .review .rfield select.need {
+.reviewmode .rfield label.need { color: var(--warn); font-weight: 600; }
+.reviewmode .rfield input.need, .reviewmode .rfield select.need {
   border-color: var(--warn);
   background: rgba(245, 158, 11, 0.1);
 }
-.review .rfield select.fromtable { color: #a5b4fc; font-style: italic; }
-.review .rval {
+.reviewmode .rfield select.fromtable { color: #a5b4fc; font-style: italic; }
+.reviewmode .rval {
   padding: 6px 8px;
   background: #16202f;
   border: 1px solid var(--line);
@@ -443,7 +444,7 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
   color: var(--muted);
   word-break: break-all;
 }
-.review .viewer { height: 100%; }
+.reviewmode .viewer { height: 100%; }
 
 /* 드롭다운이 가장 긴 항목 길이만큼 칸을 밀어내지 않게 한다 */
 .sheet td select, .sheet td input { min-width: 0; max-width: 100%; }
