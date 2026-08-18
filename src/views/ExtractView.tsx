@@ -273,6 +273,7 @@ export function ExtractView({ master, prompt, onDone }: Props) {
             onChange={persist}
             pageCount={st.progress.total}
             pagePreviews={st.previews}
+            jobId={st.jobId}
           />
         </>
       )}

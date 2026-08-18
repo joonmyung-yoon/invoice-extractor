@@ -4,7 +4,12 @@ import { buildFileName } from './normalize'
 const CORP = 'SCR'
 const CATEGORY = 'Bill'
 
-/** 예시 파일과 동일한 16컬럼 순서로 한 행을 펼친다. */
+/**
+ * 예시 파일과 동일한 16컬럼 순서로 한 행을 펼친다.
+ *
+ * Memo 는 원본 장부에 없는 우리 내부 메모라 값을 내보내지 않는다. 다만 컬럼 자리는
+ * 비운 채로 남긴다 — 칸을 빼면 붙여넣을 때 뒤쪽 열이 통째로 밀린다.
+ */
 function cells(row: Row, index: number): (string | number)[] {
   return [
     index + 1,
@@ -14,7 +19,7 @@ function cells(row: Row, index: number): (string | number)[] {
     row.invoiceNumber,
     row.vendorName,
     '', // SCR_SUB_VENDOR — 사람이 나중에 채우는 칸
-    row.memo,
+    '', // Memo — 내부 메모라 내보내지 않는다
     row.coa,
     row.amount,
     '', // PAID

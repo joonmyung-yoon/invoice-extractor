@@ -181,6 +181,7 @@ export function HistoryView({ master, reloadKey }: Props) {
                   invoices={invoices}
                   master={master}
                   pageCount={sel.pageCount}
+                  jobId={sel.id}
                   onChange={async (next) => {
                     await api.saveJobPayload(sel.id, { ...sel.payload, rows: next })
                     await reload()

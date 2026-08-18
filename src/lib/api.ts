@@ -42,6 +42,12 @@ export const saveJobPayload = (jobId: string, payload: unknown) =>
   invoke<void>('save_job_payload', { jobId, payload })
 
 export const listJobs = () => invoke<any[]>('list_jobs')
+
+/** 저장된 페이지 이미지를 data URL 로 읽는다. 지워졌으면 null. */
+export const pageImage = (jobId: string, page: number) =>
+  invoke<string | null>('page_image', { jobId, page })
+
+export const hasPageImages = (jobId: string) => invoke<boolean>('has_page_images', { jobId })
 export const deleteJob = (jobId: string) => invoke<void>('delete_job', { jobId })
 
 // ── prompts ───────────────────────────────────────────────────────

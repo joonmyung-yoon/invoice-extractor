@@ -281,6 +281,38 @@ async fn save_file_as(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// 작업의 페이지 이미지를 돌려준다 (data URL).
+///
+/// 추출 직후에는 화면이 들고 있는 미리보기를 쓰면 되지만, 이력에서 과거 기록을 열면
+/// 그 미리보기가 없다. 원본과 대조하려면 디스크에 있는 이미지를 다시 읽어야 한다.
+#[tauri::command]
+fn page_image(state: State<AppState>, job_id: String, page: usize) -> Result<Option<String>, String> {
+    let path = state
+        .data_dir
+        .join("jobs")
+        .join(&job_id)
+        .join(format!("page{page:02}.png"));
+
+    if !path.is_file() {
+        return Ok(None); // 이미지를 비웠을 수 있다. 오류가 아니다.
+    }
+
+    let bytes = std::fs::read(&path).map_err(|x| x.to_string())?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(Some(format!("data:image/png;base64,{b64}")))
+}
+
+/// 그 작업의 페이지 이미지가 아직 남아 있는지.
+#[tauri::command]
+fn has_page_images(state: State<AppState>, job_id: String) -> bool {
+    std::fs::read_dir(state.data_dir.join("jobs").join(&job_id))
+        .map(|d| {
+            d.flatten()
+                .any(|f| f.path().extension().and_then(|x| x.to_str()) == Some("png"))
+        })
+        .unwrap_or(false)
+}
+
 // ── 저장 용량 ──────────────────────────────────────────────────────
 
 fn dir_size(path: &std::path::Path) -> u64 {
@@ -712,6 +744,8 @@ pub fn run() {
             set_setting,
             data_dir,
             save_file_as,
+            page_image,
+            has_page_images,
             storage_stats,
             clear_page_images,
             purge_jobs_before,

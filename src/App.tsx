@@ -5,11 +5,10 @@ import { useExtraction } from './lib/extractionStore'
 import { EMPTY_MASTER, type Master, type Prompt } from './lib/types'
 import { ExtractView } from './views/ExtractView'
 import { HistoryView } from './views/HistoryView'
-import { LedgerView } from './views/LedgerView'
 import { PromptsView } from './views/PromptsView'
 import { SettingsView } from './views/SettingsView'
 
-type Tab = 'extract' | 'ledger' | 'prompts' | 'history' | 'settings'
+type Tab = 'extract' | 'prompts' | 'history' | 'settings'
 
 const BUILTIN_ID = 'builtin-default'
 
@@ -55,7 +54,6 @@ export default function App() {
 
   const nav: [Tab, string][] = [
     ['extract', '추출'],
-    ['ledger', '장부'],
     ['history', '이력'],
     ['prompts', '프롬프트'],
     ['settings', '설정'],
@@ -104,8 +102,6 @@ export default function App() {
             prompt={activePrompt}
             onDone={() => setHistoryKey((k) => k + 1)}
           />
-        ) : tab === 'ledger' ? (
-          <LedgerView />
         ) : tab === 'history' ? (
           <HistoryView master={master} reloadKey={historyKey} />
         ) : tab === 'prompts' ? (

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import * as api from '../lib/api'
 import { buildFileName } from '../lib/normalize'
-import { toSheetRows, toXlsx } from '../lib/export'
+import { toXlsx } from '../lib/export'
 import { printRows } from '../lib/printView'
-import { OUTPUT_COLUMNS, type Invoice, type Master, type Row } from '../lib/types'
+import { PageViewer } from './PageViewer'
+import type { Invoice, Master, Row } from '../lib/types'
 
 interface Props {
   rows: Row[]
@@ -12,6 +13,8 @@ interface Props {
   onChange: (rows: Row[]) => void
   pageCount?: number
   pagePreviews?: string[]
+  /** 이력에서 열었을 때 디스크의 페이지 이미지를 읽기 위한 작업 id */
+  jobId?: string | null
 }
 
 interface Col {
@@ -70,7 +73,7 @@ const toNum = (v: string) => {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0
 }
 
-export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Props) {
+export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobId }: Props) {
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null)
   const [query, setQuery] = useState('')
   const [reviewOnly, setReviewOnly] = useState(false)
@@ -78,8 +81,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
   const [lastClicked, setLastClicked] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [focusPages, setFocusPages] = useState<number[] | null>(null)
+  // 지금 원본과 대조 중인 행
+  const [focusId, setFocusId] = useState<string | null>(null)
   // '직접 입력…' 으로 전환한 칸들 (행id:컬럼키)
   const [freeform, setFreeform] = useState<Set<string>>(new Set())
 
@@ -176,6 +179,9 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
     }
   }
 
+  // 아무것도 안 고르면 첫 행을 보여준다. 빈 화면보다 낫다.
+  const focusRow = view.find((r) => r.id === focusId) ?? view[0] ?? null
+
   const mismatches = invoices.filter((i) => i.splitCheck === 'mismatch')
   const reviewCount = rows.reduce((a, r) => a + r.needsReview.length, 0)
   const sum = targets.reduce((a, r) => a + r.amount, 0)
@@ -220,30 +226,6 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
         >
           PDF로 저장
         </button>
-        <button
-          disabled={saving}
-          title="검토가 끝난 행을 장부에 넣습니다. 인터넷 없이도 저장됩니다."
-          onClick={async () => {
-            setSaving(true)
-            setToast(null)
-            setError(null)
-            try {
-              const left = targets.reduce((a, r) => a + r.needsReview.length, 0)
-              if (left > 0 && !confirm(`확인이 필요한 칸이 ${left}개 있습니다. 그래도 장부에 넣을까요?`)) {
-                return
-              }
-              const res = await api.saveRecordsLocal([...OUTPUT_COLUMNS], toSheetRows(targets))
-              setToast(`장부에 ${res.saved}행 저장 · 시트 미반영 ${res.pending}행`)
-              setTimeout(() => setToast(null), 4000)
-            } catch (err) {
-              setError(String(err))
-            } finally {
-              setSaving(false)
-            }
-          }}
-        >
-          {saving ? '저장 중…' : '장부에 저장'}
-        </button>
       </div>
 
       {error && <div className="alert err" style={{ whiteSpace: 'pre-wrap' }}>{error}</div>}
@@ -257,7 +239,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
         </div>
       ))}
 
-      <div className="table-wrap sheet" style={{ maxHeight: '56vh' }}>
+      <div className="split">
+      <div className="table-wrap sheet">
         <table>
           <thead>
             <tr>
@@ -290,7 +273,13 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
           </thead>
           <tbody>
             {view.map((r) => (
-              <tr key={r.id} className={picked.has(r.id) ? 'picked' : ''}>
+              <tr
+                key={r.id}
+                className={[picked.has(r.id) ? 'picked' : '', focusId === r.id ? 'focused' : '']
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setFocusId(r.id)}
+              >
                 <td className="pick">
                   <input
                     type="checkbox"
@@ -310,17 +299,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
                   if (c.kind === 'readonly') {
                     return (
                       <td key={c.key} className={cls}>
-                        {c.key === 'pages' ? (
-                          <button
-                            className="pagebtn"
-                            disabled={!pagePreviews?.length}
-                            onClick={() => setFocusPages(r.sourcePages)}
-                          >
-                            {c.get(r) || '—'}
-                          </button>
-                        ) : (
-                          <div className="ro mono" title={c.get(r)}>{c.get(r)}</div>
-                        )}
+                        <div className="ro mono" title={c.get(r)}>{c.get(r)}</div>
                       </td>
                     )
                   }
@@ -398,6 +377,18 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
         </table>
       </div>
 
+      <PageViewer
+        pages={focusRow?.sourcePages ?? []}
+        previews={pagePreviews}
+        jobId={jobId}
+        caption={
+          focusRow
+            ? `${focusRow.vendorName || '(벤더 없음)'} · ${focusRow.invoiceNumber || '(번호 없음)'} · ${focusRow.amount.toFixed(2)}`
+            : undefined
+        }
+      />
+      </div>
+
 
       <div className="small muted" style={{ marginTop: 6 }}>
         왼쪽 체크박스로 행 선택 · Shift+클릭으로 여러 행 한 번에 · 아무것도 선택 안 하면 보이는 행
@@ -409,25 +400,6 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
         </span>
       </div>
 
-      {focusPages && pagePreviews && (
-        <div className="panel" style={{ marginTop: 12 }}>
-          <div className="row" style={{ marginBottom: 8 }}>
-            <h3 style={{ margin: 0 }}>원본 페이지 {focusPages.join(', ')}</h3>
-            <span className="spacer" />
-            <button onClick={() => setFocusPages(null)}>닫기</button>
-          </div>
-          <div className="pages">
-            {focusPages.map((p) => (
-              <figure key={p}>
-                <a href={pagePreviews[p - 1]} target="_blank" rel="noreferrer">
-                  <img src={pagePreviews[p - 1]} alt={`page ${p}`} />
-                </a>
-                <figcaption>p.{p}</figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-      )}
     </>
   )
 }
