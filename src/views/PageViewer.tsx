@@ -5,6 +5,8 @@ import { renderPage } from '../lib/pdfCache'
 export interface Highlight {
   field: string
   label: string
+  /** 그 자리에서 읽어낸 값. 원본 위에서 바로 확인할 수 있게 같이 보여준다. */
+  value?: string
   page: number
   /** [x0, y0, x1, y1], 페이지 크기 대비 0~1000 */
   box: [number, number, number, number]
@@ -21,6 +23,8 @@ export interface ViewerTarget {
 }
 
 interface Props extends ViewerTarget {
+  /** 원본 위 영역에 마우스를 올렸을 때. 검토 칸을 같이 강조하는 데 쓴다. */
+  onHoverField?: (field: string | null) => void
   /** 추출 직후라면 이미 만들어 둔 미리보기. PDF 가 없을 때의 대비책. */
   fallback?: string[]
   onClose?: () => void
@@ -42,6 +46,7 @@ export function PageViewer({
   fallback,
   highlights,
   activeField,
+  onHoverField,
   onClose,
   onPopOut,
   standalone,
@@ -197,9 +202,13 @@ export function PageViewer({
                       width: `${(h.box[2] - h.box[0]) / 10}%`,
                       height: `${(h.box[3] - h.box[1]) / 10}%`,
                     }}
-                    title={h.label}
+                    onMouseEnter={() => onHoverField?.(h.field)}
+                    onMouseLeave={() => onHoverField?.(null)}
                   >
-                    <i>{h.label}</i>
+                    <i>
+                      {h.label}
+                      {h.value ? `: ${h.value}` : ''}
+                    </i>
                   </span>
                 ))}
           </div>

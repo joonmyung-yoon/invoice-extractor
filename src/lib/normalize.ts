@@ -169,7 +169,22 @@ function parseBoxes(raw: any): Record<string, FieldBox> {
   const out: Record<string, FieldBox> = {}
   if (!raw || typeof raw !== 'object') return out
 
-  for (const [field, v] of Object.entries<any>(raw)) {
+  // 모델은 invoice_number 처럼 주고 표는 invoiceNumber 로 찾는다. 여기서 맞춰 두지
+  // 않으면 표시는 되는데 칸을 눌러도 강조되지 않는다.
+  const rename: Record<string, string> = {
+    invoice_number: 'invoiceNumber',
+    vendor_name: 'vendorName',
+    card_id: 'cardId',
+    sub_vendor: 'vendorName',
+    coa: 'coa',
+    amount: 'amount',
+    date: 'date',
+    location: 'location',
+    payment: 'payment',
+  }
+
+  for (const [rawField, v] of Object.entries<any>(raw)) {
+    const field = rename[rawField] ?? rawField
     const page = Number(v?.page)
     const b = v?.box
     if (!Number.isFinite(page) || page < 1 || !Array.isArray(b) || b.length !== 4) continue
@@ -178,7 +193,18 @@ function parseBoxes(raw: any): Record<string, FieldBox> {
     if (![x0, y0, x1, y1].every((n) => Number.isFinite(n) && n >= 0 && n <= 1000)) continue
     if (x1 <= x0 || y1 <= y0) continue
 
-    out[field] = { page, box: [x0, y0, x1, y1] }
+    // 모델 좌표는 몇 % 씩 어긋나는 일이 잦다. 조금 넉넉히 잡아야 값이 테두리 안에 들어온다.
+    const padX = Math.max(6, (x1 - x0) * 0.08)
+    const padY = Math.max(6, (y1 - y0) * 0.35)
+    out[field] = {
+      page,
+      box: [
+        Math.max(0, x0 - padX),
+        Math.max(0, y0 - padY),
+        Math.min(1000, x1 + padX),
+        Math.min(1000, y1 + padY),
+      ],
+    }
   }
   return out
 }

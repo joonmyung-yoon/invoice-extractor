@@ -486,9 +486,12 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
   position: absolute;
   border: 1.5px solid rgba(59, 130, 246, 0.75);
   border-radius: 2px;
-  pointer-events: none;
+  /* 올려서 어떤 값인지 확인할 수 있어야 하므로 마우스를 받는다 */
+  cursor: help;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
 }
+.hl:hover { border-color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
+.hl:hover i { opacity: 1; }
 .hl i {
   position: absolute;
   left: 0;

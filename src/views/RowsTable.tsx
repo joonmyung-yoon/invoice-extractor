@@ -111,6 +111,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   const [freeform, setFreeform] = useState<Set<string>>(new Set())
   // 지금 보고 있는 칸. 원본에서 그 자리를 강조하는 데 쓴다.
   const [activeField, setActiveField] = useState<string | null>(null)
+  // 원본 위 영역에 마우스를 올렸을 때. 반대 방향으로 검토 칸을 강조한다.
+  const [hoverField, setHoverField] = useState<string | null>(null)
 
   const view = useMemo(() => {
     let out = rows
@@ -180,10 +182,37 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
     setLastClicked(id)
   }
 
+  /** 장부에 나갈 칸 중 비어 있는 것을 센다. 붙여넣고 나서 발견하면 찾기 번거롭다. */
+  const countBlanks = (rows: Row[]) => {
+    const check: [string, (r: Row) => string][] = [
+      ['buyer', (r) => r.location],
+      ['date', (r) => r.date],
+      ['invoiceno', (r) => r.invoiceNumber],
+      ['sub-vendor', (r) => r.vendorName],
+      ['cogs', (r) => r.coa],
+      ['payment', (r) => r.payment],
+    ]
+    const out: string[] = []
+    for (const [name, get] of check) {
+      const n = rows.filter((r) => !get(r).trim()).length
+      if (n) out.push(`${name} ${n}칸`)
+    }
+    return out
+  }
+
   const copy = async (withHeader: boolean) => {
     // 화면 컬럼이 아니라 장부 형식(toTsv)을 그대로 쓴다. 표에는 메모처럼 장부에 없는
     // 칸이 섞여 있어서, 화면 기준으로 만들면 컬럼이 하나씩 밀린다.
     await navigator.clipboard.writeText(toTsv(targets, withHeader))
+    const blanks = countBlanks(targets)
+    if (blanks.length) {
+      setToast(
+        `${targets.length}행 복사됨 — 비어 있는 칸이 있습니다: ${blanks.join(', ')}. ` +
+          '붙여넣어도 자리는 유지되지만 값은 직접 채워야 합니다.',
+      )
+      setTimeout(() => setToast(null), 6000)
+      return
+    }
     setToast(`${targets.length}행 복사됨${withHeader ? ' (헤더 포함)' : ''}`)
     setTimeout(() => setToast(null), 1800)
   }
@@ -207,12 +236,16 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   const focusIndex = Math.max(0, view.findIndex((r) => r.id === focusRow?.id))
 
   // 모델이 알려 준 자리를 화면 이름표와 함께 넘긴다.
-  const highlights = Object.entries(focusRow?.boxes ?? {}).map(([field, b]) => ({
-    field,
-    label: COLS.find((c) => c.key === field)?.label.replace(' *', '') ?? field,
-    page: b.page,
-    box: b.box,
-  }))
+  const highlights = Object.entries(focusRow?.boxes ?? {}).map(([field, b]) => {
+    const col = COLS.find((c) => c.key === field)
+    return {
+      field,
+      label: col?.label.replace(' *', '') ?? field,
+      value: focusRow && col ? col.get(focusRow, focusIndex) : '',
+      page: b.page,
+      box: b.box,
+    }
+  })
 
   const viewerTarget = {
     jobId: jobId ?? null,
@@ -221,7 +254,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
       ? `${focusRow.vendorName || '(벤더 없음)'} · ${focusRow.invoiceNumber || '(번호 없음)'} · ${focusRow.amount.toFixed(2)}`
       : undefined,
     highlights,
-    activeField,
+    activeField: hoverField ?? activeField,
   }
 
   useEffect(() => {
@@ -367,7 +400,9 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
               const hasBox = !!focusRow.boxes?.[c.key]
               return (
                 <div
-                  className={`rfield ${activeField === c.key ? 'active' : ''}`}
+                  className={`rfield ${
+                    (hoverField ?? activeField) === c.key ? 'active' : ''
+                  }`}
                   key={c.key}
                   onFocusCapture={() => setActiveField(c.key)}
                   onMouseEnter={() => hasBox && setActiveField(c.key)}
@@ -409,7 +444,12 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
             })}
           </div>
 
-          <PageViewer {...viewerTarget} fallback={pagePreviews} onPopOut={() => setMode('window')} />
+          <PageViewer
+            {...viewerTarget}
+            fallback={pagePreviews}
+            onHoverField={setHoverField}
+            onPopOut={() => setMode('window')}
+          />
         </div>
       )}
 
@@ -574,6 +614,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
           <PageViewer
             {...viewerTarget}
             fallback={pagePreviews}
+            onHoverField={setHoverField}
             onClose={() => setMode('off')}
             onPopOut={() => setMode('window')}
           />
