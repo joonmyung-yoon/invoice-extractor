@@ -296,6 +296,66 @@ async fn save_file_as(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// 작업 폴더에 남아 있는 조각별 추출 결과를 모아 돌려준다.
+///
+/// 앱이 강제 종료되면 claude 는 살아남아 결과를 다 쓰고 끝난다. 그런데 그걸 받아 갈
+/// 앱이 없어서 결과가 디스크에 남은 채 버려진다. 이미 비용을 치른 작업이므로
+/// 다시 켰을 때 주워 담는다. 정상 종료 때도 먼저 끝난 조각은 살릴 수 있다.
+#[tauri::command]
+fn chunk_results(state: State<AppState>, job_id: String) -> Result<Vec<serde_json::Value>, String> {
+    let root = state.data_dir.join("jobs").join(&job_id);
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Ok(Vec::new());
+    };
+
+    // c0, c1 … 순서를 지켜야 합칠 때 페이지 순서가 유지된다.
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+
+    let mut out = Vec::new();
+    for d in dirs {
+        let f = d.join("extracted.json");
+        if !f.is_file() {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&f) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                out.push(v);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// 아직 끝나지 않은 것으로 남아 있는 작업들.
+#[tauri::command]
+fn unfinished_jobs(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.db.0.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, pdf_name, page_count, status FROM jobs
+             WHERE status != 'done' ORDER BY created_at DESC",
+        )
+        .map_err(|x| x.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, String>(0)?,
+                "pdfName": r.get::<_, String>(1)?,
+                "pageCount": r.get::<_, i64>(2)?,
+                "status": r.get::<_, String>(3)?,
+            }))
+        })
+        .map_err(|x| x.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
 /// 원본 PDF 를 작업 폴더에 보관한다.
 ///
 /// 추출용 이미지는 긴 변 1568px 로 줄여 만든다(claude 가 그 크기로 보기 때문에 더 크게
@@ -839,6 +899,8 @@ pub fn run() {
             set_setting,
             data_dir,
             save_file_as,
+            chunk_results,
+            unfinished_jobs,
             store_pdf,
             read_pdf,
             page_image,

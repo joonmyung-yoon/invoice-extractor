@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../lib/api'
-import { toXlsx } from '../lib/export'
+import { toTsv, toXlsx } from '../lib/export'
 import { printRows } from '../lib/printView'
 import { PageViewer } from './PageViewer'
 import { BUYER_ENTITY, type Invoice, type Master, type Row } from '../lib/types'
@@ -179,12 +179,9 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   }
 
   const copy = async (withHeader: boolean) => {
-    const lines: string[] = []
-    if (withHeader) lines.push(COLS.map((c) => c.label.replace(' *', '')).join('\t'))
-    for (const [i, r] of targets.entries()) {
-      lines.push(COLS.map((c) => (c.key === 'memo' ? '' : c.get(r, i))).join('\t'))
-    }
-    await navigator.clipboard.writeText(lines.join('\n'))
+    // 화면 컬럼이 아니라 장부 형식(toTsv)을 그대로 쓴다. 표에는 메모처럼 장부에 없는
+    // 칸이 섞여 있어서, 화면 기준으로 만들면 컬럼이 하나씩 밀린다.
+    await navigator.clipboard.writeText(toTsv(targets, withHeader))
     setToast(`${targets.length}행 복사됨${withHeader ? ' (헤더 포함)' : ''}`)
     setTimeout(() => setToast(null), 1800)
   }

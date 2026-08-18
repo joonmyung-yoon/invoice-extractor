@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as api from './lib/api'
 import { DEFAULT_PROMPT } from './lib/defaultPrompt'
 import { useExtraction } from './lib/extractionStore'
+import { recoverUnfinished } from './lib/recover'
 import { EMPTY_MASTER, type Master, type Prompt } from './lib/types'
 import { ExtractView } from './views/ExtractView'
 import { HistoryView } from './views/HistoryView'
@@ -27,6 +28,7 @@ function MainApp() {
   const [activePromptId, setActivePromptId] = useState<string | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
   const [ready, setReady] = useState(false)
+  const [recovered, setRecovered] = useState<{ pdfName: string; rows: number }[]>([])
   const ext = useExtraction()
 
   useEffect(() => {
@@ -49,6 +51,14 @@ function MainApp() {
       api.syncMaster().then(setMaster).catch(() => {})
 
       setReady(true)
+
+      // 지난번에 앱이 강제로 꺼졌다면 결과가 디스크에 남아 있을 수 있다.
+      const m = await api.cachedMaster().catch(() => EMPTY_MASTER)
+      const got = await recoverUnfinished(m).catch(() => [])
+      if (got.length) {
+        setRecovered(got)
+        setHistoryKey((k) => k + 1)
+      }
     })()
   }, [])
 
@@ -106,6 +116,15 @@ function MainApp() {
       </aside>
 
       <main className="main">
+        {recovered.length > 0 && (
+          <div className="alert ok">
+            지난번에 끝내지 못한 추출 {recovered.length}건을 되살렸습니다 —{' '}
+            {recovered.map((r) => `${r.pdfName} (${r.rows}행)`).join(', ')}. 이력 탭에서 볼 수 있습니다.
+            <button style={{ marginLeft: 8, padding: '1px 8px' }} onClick={() => setRecovered([])}>
+              닫기
+            </button>
+          </div>
+        )}
         {!ready ? (
           <div className="muted">불러오는 중…</div>
         ) : tab === 'extract' ? (

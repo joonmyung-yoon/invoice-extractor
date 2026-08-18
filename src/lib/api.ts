@@ -65,6 +65,12 @@ export const storePdf = (jobId: string, bytes: Uint8Array) =>
   invoke<void>('store_pdf', { jobId, bytes: Array.from(bytes) })
 export const deleteJob = (jobId: string) => invoke<void>('delete_job', { jobId })
 
+/** 작업 폴더에 남아 있는 조각별 결과. 앱이 강제 종료돼도 여기서 주워 담는다. */
+export const chunkResults = (jobId: string) => invoke<any[]>('chunk_results', { jobId })
+
+export const unfinishedJobs = () =>
+  invoke<{ id: string; pdfName: string; pageCount: number; status: string }[]>('unfinished_jobs')
+
 // ── prompts ───────────────────────────────────────────────────────
 
 export const savePrompt = (args: {
