@@ -26,15 +26,29 @@ interface Col {
    *          전환해 새 값을 넣을 수 있다.
    */
   kind: 'text' | 'num' | 'select' | 'readonly'
-  get: (r: Row) => string
+  get: (r: Row, index: number) => string
   set?: (r: Row, v: string) => Row
   options?: (m: Master) => string[]
 }
 
+type Mode = 'off' | 'split' | 'review' | 'window'
+
 /** 목록에 없는 값을 직접 넣겠다는 표시. */
 const CUSTOM = '\u0000custom'
 
+/**
+ * 원본 엑셀(samples/invoice_extract_example.xlsx)의 16컬럼을 순서 그대로 보여준다.
+ *
+ * 값이 항상 고정이거나 비어 있는 칸도 감추지 않는다. 화면에서 보는 것과 붙여넣는 것이
+ * 같아야 어디에 무엇이 들어가는지 헷갈리지 않는다.
+ *
+ * 헤더 표기도 원본을 따른다. 원본은 O열이 'FileName' 인데 지점 코드가 들어가고
+ * P열은 헤더가 비어 있는데 파일명이 들어간다 — 어긋나 있지만 그쪽 시트가 그렇게 생겼다.
+ */
 const COLS: Col[] = [
+  { key: 'no', label: 'No', width: 46, kind: 'readonly', get: (_r, i) => String(i + 1) },
+  { key: 'corp', label: 'CORP', width: 58, kind: 'readonly', get: () => 'SCR' },
+  { key: 'category', label: 'Category', width: 74, kind: 'readonly', get: () => 'Bill' },
   { key: 'date', label: 'DATE', width: 100, kind: 'text', get: (r) => r.date, set: (r, v) => ({ ...r, date: v }) },
   { key: 'invoiceNumber', label: 'Invoice_number', width: 136, kind: 'text', get: (r) => r.invoiceNumber, set: (r, v) => ({ ...r, invoiceNumber: v }) },
   {
@@ -42,30 +56,35 @@ const COLS: Col[] = [
     get: (r) => r.vendorName, set: (r, v) => ({ ...r, vendorName: v }),
     options: (m) => m.vendors.map((v) => v.canonicalName),
   },
-  // 원본 장부에는 없는 우리 내부 메모. 위치는 엑셀의 Memo 자리에 맞춘다.
-  { key: 'memo', label: 'Memo *', width: 150, kind: 'text', get: (r) => r.memo, set: (r, v) => ({ ...r, memo: v }) },
+  { key: 'subVendor', label: 'SCR_SUB_VENDOR', width: 130, kind: 'readonly', get: () => '' },
+  // 우리 내부 메모. 붙여넣기·내보내기에는 나가지 않는다.
+  { key: 'memo', label: 'Memo *', width: 160, kind: 'text', get: (r) => r.memo, set: (r, v) => ({ ...r, memo: v }) },
   {
     key: 'coa', label: 'COA', width: 190, kind: 'select',
     get: (r) => r.coa, set: (r, v) => ({ ...r, coa: v }),
     options: (m) => m.coa,
   },
   { key: 'amount', label: 'AMT', width: 100, kind: 'num', get: (r) => r.amount.toFixed(2), set: (r, v) => ({ ...r, amount: toNum(v) }) },
+  { key: 'paid', label: 'PAID', width: 62, kind: 'readonly', get: () => '' },
   {
     key: 'payment', label: 'PAYMENT', width: 96, kind: 'select',
     get: (r) => r.payment, set: (r, v) => ({ ...r, payment: v as Row['payment'] }),
     options: () => ['CARD', 'CHECK', 'ACH'],
   },
+  { key: 'paidDate', label: 'PAID_DATE', width: 92, kind: 'readonly', get: () => '' },
   {
     key: 'cardId', label: 'CARD_ID', width: 110, kind: 'select',
     get: (r) => r.cardId, set: (r, v) => ({ ...r, cardId: v }),
     options: (m) => m.cards.map((c) => c.cardId),
   },
   {
-    key: 'location', label: 'LOCATION', width: 100, kind: 'select',
+    // 원본 헤더는 'FileName' 이지만 실제로는 지점 코드가 들어가는 칸이다.
+    key: 'location', label: 'FileName', width: 104, kind: 'select',
     get: (r) => r.location, set: (r, v) => ({ ...r, location: v.toUpperCase() }),
     options: (m) => m.locations.map((l) => l.code),
   },
-  { key: 'fileName', label: 'FileName', width: 330, kind: 'readonly', get: (r) => buildFileName(r) },
+  // 원본에는 헤더가 비어 있다. 실제 파일명이 들어가는 칸.
+  { key: 'fileName', label: '', width: 330, kind: 'readonly', get: (r) => buildFileName(r) },
 ]
 
 const toNum = (v: string) => {
@@ -84,8 +103,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   // 지금 원본과 대조 중인 행
   const [focusId, setFocusId] = useState<string | null>(null)
   // 원본을 어떻게 볼지: 안 봄 / 나란히 / 새 창
-  const [mode, setMode] = useState<'off' | 'split' | 'window'>(
-    () => (localStorage.getItem('viewerMode') as 'off' | 'split' | 'window') ?? 'off',
+  const [mode, setMode] = useState<Mode>(
+    () => (localStorage.getItem('viewerMode') as Mode) ?? 'off',
   )
   // 나란히 볼 때 표가 차지하는 비율(%)
   const [ratio, setRatio] = useState(() => Number(localStorage.getItem('viewerRatio')) || 58)
@@ -99,15 +118,15 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
 
     const q = query.trim().toLowerCase()
     if (q) {
-      out = out.filter((r) => COLS.some((c) => c.get(r).toLowerCase().includes(q)))
+      out = out.filter((r, i) => COLS.some((c) => c.get(r, i).toLowerCase().includes(q)))
     }
 
     if (sort) {
       const col = COLS.find((c) => c.key === sort.key)
       if (col) {
         out = [...out].sort((a, b) => {
-          const av = col.get(a)
-          const bv = col.get(b)
+          const av = col.get(a, 0)
+          const bv = col.get(b, 0)
           const an = Number(av)
           const bn = Number(bv)
           const cmp =
@@ -163,9 +182,9 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
 
   const copy = async (withHeader: boolean) => {
     const lines: string[] = []
-    if (withHeader) lines.push(COLS.filter((c) => c.key !== 'pages').map((c) => c.label).join('\t'))
-    for (const r of targets) {
-      lines.push(COLS.filter((c) => c.key !== 'pages').map((c) => c.get(r)).join('\t'))
+    if (withHeader) lines.push(COLS.map((c) => c.label.replace(' *', '')).join('\t'))
+    for (const [i, r] of targets.entries()) {
+      lines.push(COLS.map((c) => (c.key === 'memo' ? '' : c.get(r, i))).join('\t'))
     }
     await navigator.clipboard.writeText(lines.join('\n'))
     setToast(`${targets.length}행 복사됨${withHeader ? ' (헤더 포함)' : ''}`)
@@ -188,6 +207,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
 
   // 아무것도 안 고르면 첫 행을 보여준다. 빈 화면보다 낫다.
   const focusRow = view.find((r) => r.id === focusId) ?? view[0] ?? null
+  const focusIndex = Math.max(0, view.findIndex((r) => r.id === focusRow?.id))
 
   const viewerTarget = {
     jobId: jobId ?? null,
@@ -265,6 +285,13 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
           <button className={mode === 'split' ? 'on' : ''} onClick={() => setMode('split')}>
             나란히
           </button>
+          <button
+            className={mode === 'review' ? 'on' : ''}
+            onClick={() => setMode('review')}
+            title="한 건씩 원본과 대조합니다. 원본이 화면을 넓게 씁니다."
+          >
+            검토
+          </button>
           <button className={mode === 'window' ? 'on' : ''} onClick={() => setMode('window')}>
             새 창
           </button>
@@ -300,9 +327,86 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
         </div>
       ))}
 
+      {mode === 'review' && focusRow && (
+        <div className="review">
+          <div className="rpane">
+            <div className="row" style={{ marginBottom: 8 }}>
+              <button
+                disabled={focusIndex <= 0}
+                onClick={() => setFocusId(view[focusIndex - 1]?.id ?? null)}
+              >
+                ↑ 이전
+              </button>
+              <span className="badge">
+                {focusIndex + 1} / {view.length}
+              </span>
+              <button
+                disabled={focusIndex >= view.length - 1}
+                onClick={() => setFocusId(view[focusIndex + 1]?.id ?? null)}
+              >
+                다음 ↓
+              </button>
+              <span className="spacer" />
+              {focusRow.needsReview.length > 0 ? (
+                <span className="badge warn">확인 {focusRow.needsReview.length}칸</span>
+              ) : (
+                <span className="badge ok">확인 완료</span>
+              )}
+            </div>
+
+            {COLS.filter((c) => c.kind !== 'readonly' || c.key === 'fileName').map((c) => {
+              const need = focusRow.needsReview.includes(c.key)
+              const fromTable = focusRow.sources?.[c.key] === 'table'
+              return (
+                <div className="rfield" key={c.key}>
+                  <label className={need ? 'need' : ''}>
+                    {c.label || 'FileName'}
+                    {c.key === 'location' && <span className="muted"> (지점)</span>}
+                  </label>
+                  {c.kind === 'readonly' ? (
+                    <div className="rval mono small">{c.get(focusRow, focusIndex)}</div>
+                  ) : c.kind === 'select' ? (
+                    <select
+                      className={need ? 'need' : fromTable ? 'fromtable' : ''}
+                      value={c.get(focusRow, focusIndex)}
+                      onChange={(ev) => edit(focusRow.id, c, ev.target.value)}
+                    >
+                      <option value="">—</option>
+                      {c.options!(master).map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                      {(() => {
+                        const v = c.get(focusRow, focusIndex)
+                        return v && !c.options!(master).includes(v) ? (
+                          <option value={v}>{v}</option>
+                        ) : null
+                      })()}
+                    </select>
+                  ) : (
+                    <input
+                      className={need ? 'need' : ''}
+                      value={c.get(focusRow, focusIndex)}
+                      onChange={(ev) => edit(focusRow.id, c, ev.target.value)}
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <PageViewer {...viewerTarget} fallback={pagePreviews} onPopOut={() => setMode('window')} />
+        </div>
+      )}
+
       <div
         className={`split ${mode === 'split' ? 'on' : ''}`}
-        style={mode === 'split' ? { gridTemplateColumns: `${ratio}% 6px 1fr` } : undefined}
+        style={
+          mode === 'split'
+            ? { gridTemplateColumns: `${ratio}% 6px 1fr` }
+            : mode === 'review'
+              ? { display: 'none' }
+              : undefined
+        }
       >
       <div className="table-wrap sheet">
         <table>
@@ -353,6 +457,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                   />
                 </td>
                 {COLS.map((c) => {
+                  const rowIndex = view.indexOf(r)
                   const fromTable = r.sources?.[c.key] === 'table' && !r.editedFields.includes(c.key)
                   const cls = [
                     c.kind === 'num' ? 'num' : '',
@@ -363,14 +468,14 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                   if (c.kind === 'readonly') {
                     return (
                       <td key={c.key} className={cls}>
-                        <div className="ro mono" title={c.get(r)}>{c.get(r)}</div>
+                        <div className="ro mono" title={c.get(r, rowIndex)}>{c.get(r, rowIndex)}</div>
                       </td>
                     )
                   }
 
                   if (c.kind === 'select') {
                     const opts = c.options!(master)
-                    const val = c.get(r)
+                    const val = c.get(r, rowIndex)
                     const cellKey = `${r.id}:${c.key}`
                     // 목록에 없는 값이거나 사용자가 직접 입력을 고른 칸은 입력창으로 바꾼다.
                     const typing = freeform.has(cellKey) || (val !== '' && !opts.includes(val))
@@ -385,7 +490,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                             onChange={(ev) => edit(r.id, c, ev.target.value)}
                             onBlur={() => {
                               // 비운 채로 벗어나면 다시 목록으로 돌아간다.
-                              if (!c.get(r)) {
+                              if (!c.get(r, rowIndex)) {
                                 const n = new Set(freeform)
                                 n.delete(cellKey)
                                 setFreeform(n)
@@ -421,7 +526,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                     <td key={c.key} className={cls}>
                       <input
                         className={c.key === 'invoiceNumber' ? 'mono' : undefined}
-                        value={c.get(r)}
+                        value={c.get(r, rowIndex)}
                         placeholder={r.needsReview.includes(c.key) ? '확인 필요' : ''}
                         onChange={(ev) => edit(r.id, c, ev.target.value)}
                       />

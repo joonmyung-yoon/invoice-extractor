@@ -405,3 +405,42 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
   .split.on .dragbar { display: none; }
   .viewer { height: 52vh; }
 }
+
+/* ── 검토 모드: 한 건씩 원본과 대조 ── */
+
+.review {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 10px;
+  height: calc(100vh - 190px);
+  min-height: 460px;
+}
+.review .rpane {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 12px;
+}
+.review .rfield { margin-bottom: 9px; }
+.review .rfield label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.review .rfield label.need { color: var(--warn); font-weight: 600; }
+.review .rfield input.need, .review .rfield select.need {
+  border-color: var(--warn);
+  background: rgba(245, 158, 11, 0.1);
+}
+.review .rfield select.fromtable { color: #a5b4fc; font-style: italic; }
+.review .rval {
+  padding: 6px 8px;
+  background: #16202f;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  word-break: break-all;
+}
+.review .viewer { height: 100%; }
