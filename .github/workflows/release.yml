@@ -137,14 +137,13 @@ jobs:
           releaseBody: |
             ## 설치 방법
 
-            **macOS** — `.dmg` 를 받아 앱을 응용 프로그램으로 옮긴 뒤,
-            **우클릭 → 열기** 로 처음 한 번 실행하세요.
-            (Apple 개발자 인증서로 서명되어 있지 않아 더블클릭으로는 열리지 않습니다.)
-
-            "손상되었습니다" 가 뜨면 터미널에서:
+            **macOS** — `.dmg` 를 열어 앱을 응용 프로그램으로 옮긴 뒤,
+            터미널에 아래를 붙여넣고 실행하세요:
             ```
             xattr -dr com.apple.quarantine "/Applications/Invoice Extractor.app"
             ```
+            서명되지 않은 앱이라 macOS 가 격리 표시를 붙입니다. 위 명령이 그것을 지웁니다.
+            (macOS 15 부터는 "우클릭 → 열기" 로는 열리지 않습니다.)
 
             **Windows** — `.msi` 또는 `.exe` 를 실행하세요.
             "Windows에서 PC를 보호했습니다" 가 뜨면 **추가 정보 → 실행**.
@@ -154,6 +153,53 @@ jobs:
             먼저 `claude --version` 이 동작하는지 확인하세요.
           releaseDraft: false
           prerelease: false
+
+      # 받는 사람이 첫 테스터가 되지 않도록, 만들어진 설치 파일이 실제로 설치되고
+      # 실행되는지 CI 에서 확인한다. 맥에서는 윈도우를 테스트할 방법이 없다.
+      - name: 윈도우 설치·실행 점검
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem -Recurse -Filter *.msi `
+            -Path "src-tauri/target/${{ matrix.target }}/release/bundle" |
+            Select-Object -First 1
+          if (-not $msi) { throw "MSI 를 찾지 못했습니다." }
+          Write-Host "설치 파일: $($msi.FullName) ($([math]::Round($msi.Length/1MB,1)) MB)"
+
+          # 무인 설치
+          $p = Start-Process msiexec.exe -Wait -PassThru `
+            -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v install.log"
+          if ($p.ExitCode -ne 0) {
+            Get-Content install.log -Tail 40
+            throw "설치 실패 (exit $($p.ExitCode))"
+          }
+          Write-Host "설치 성공"
+
+          $exe = Get-ChildItem -Recurse -Filter "invoice-extractor.exe" `
+            -Path "$env:ProgramFiles","${env:ProgramFiles(x86)}" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $exe) { throw "설치된 실행 파일을 찾지 못했습니다." }
+          Write-Host "실행 파일: $($exe.FullName)"
+
+          # 실제로 창을 띄우고 살아있는지 본다. 실행 직후 죽으면 여기서 잡힌다.
+          $app = Start-Process $exe.FullName -PassThru
+          Start-Sleep -Seconds 20
+          if ($app.HasExited) {
+            throw "앱이 실행 직후 종료되었습니다 (exit $($app.ExitCode))"
+          }
+          Write-Host "앱이 20초간 정상 실행 중"
+
+          # 앱이 자기 데이터 폴더와 DB 를 만들었는지 = 백엔드가 살아있다는 증거
+          $db = Join-Path $env:APPDATA "com.scr.invoice-extractor\invoice-extractor.db"
+          if (Test-Path $db) {
+            Write-Host "데이터베이스 생성 확인: $db"
+          } else {
+            Write-Warning "데이터베이스가 생성되지 않았습니다: $db"
+          }
+
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "점검 완료"
 
       # 릴리스 생성이 막혀도 설치 파일은 받을 수 있어야 한다.
       # 아티팩트 업로드는 기본 읽기 권한만으로도 동작한다.

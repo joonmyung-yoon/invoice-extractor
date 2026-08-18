@@ -9,3 +9,4 @@ src-tauri/gen/
 
 # 배포 산출물 (용량이 커서 저장소에 넣지 않는다)
 release/*.dmg
+release/*.zip

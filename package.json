@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "release:mac": "tauri build --target universal-apple-darwin --bundles app,dmg && mkdir -p release && cp \"src-tauri/target/universal-apple-darwin/release/bundle/dmg/Invoice Extractor_0.1.0_universal.dmg\" release/"
+    "release:mac": "tauri build --target universal-apple-darwin --bundles app,dmg && ./scripts/package-mac.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
