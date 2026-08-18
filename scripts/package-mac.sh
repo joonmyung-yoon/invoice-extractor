@@ -50,7 +50,8 @@ TXT
 xattr -cr "$STAGE/Invoice Extractor.app" 2>/dev/null || true
 
 ZIP="$OUT/InvoiceExtractor-$VERSION-mac.zip"
-rm -f "$ZIP"
+# 옛 버전이 남아 있으면 잘못 보내기 쉽다.
+rm -f "$OUT"/InvoiceExtractor-*-mac.zip "$OUT"/*.dmg
 # ditto 는 리소스 포크와 심볼릭 링크를 보존한다. zip 은 앱 번들을 깨뜨릴 수 있다.
 ditto -c -k --keepParent "$STAGE" "$ZIP"
 rm -rf "$STAGE"
