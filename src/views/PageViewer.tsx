@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import * as api from '../lib/api'
 import { renderPage } from '../lib/pdfCache'
 
 export interface ViewerTarget {
@@ -58,12 +59,15 @@ export function PageViewer({
     }
     const box = boxRef.current?.clientWidth ?? 900
     setLoading(true)
+    // PDF 가 있으면 원하는 배율로 다시 그려 가장 선명하다.
     renderPage(jobId, page, Math.round(box * zoom * 1.5))
-      .then((url) => {
-        if (!alive) return
-        // PDF 가 없는 예전 기록이면 추출 때 만든 이미지로 대체한다.
-        setSrc(url ?? fallback?.[page - 1] ?? null)
+      .then(async (url) => {
+        if (url) return url
+        // PDF 를 보관하기 전에 만든 기록이면 추출 때 쓴 페이지 이미지로 대신한다.
+        if (fallback?.[page - 1]) return fallback[page - 1]
+        return await api.pageImage(jobId, page).catch(() => null)
       })
+      .then((url) => alive && setSrc(url))
       .finally(() => alive && setLoading(false))
     return () => {
       alive = false

@@ -47,7 +47,8 @@ export function ExtractView({ master, prompt, onDone }: Props) {
 
     let jobId: string | null = null
     try {
-      const pdf = await loadPdf(await file.arrayBuffer())
+      const bytes = await file.arrayBuffer()
+      const pdf = await loadPdf(bytes)
       extraction.set({ progress: { done: 0, total: pdf.pageCount } })
 
       const body = buildPrompt(prompt.body, master)
@@ -59,6 +60,9 @@ export function ExtractView({ master, prompt, onDone }: Props) {
         promptSnapshot: body,
       })
       extraction.set({ jobId })
+
+      // 원본을 보관해 둬야 나중에 크게 확대해도 선명하게 대조할 수 있다.
+      await api.storePdf(jobId, new Uint8Array(bytes)).catch(() => {})
 
       const base64: string[] = []
       const urls: string[] = []
