@@ -62,6 +62,13 @@ export const setSetting = (key: string, value: string) =>
   invoke<void>('set_setting', { key, value })
 export const dataDir = () => invoke<string>('data_dir')
 
+/**
+ * 저장 대화상자를 띄워 파일로 내보낸다. 저장한 경로를 돌려주고, 취소하면 null.
+ * 웹의 <a download> 는 Tauri 웹뷰에서 동작하지 않아 이 경로를 써야 한다.
+ */
+export const saveFileAs = (defaultName: string, bytes: Uint8Array) =>
+  invoke<string | null>('save_file_as', { defaultName, bytes: Array.from(bytes) })
+
 // ── 저장 용량 ──────────────────────────────────────────────────────
 
 export interface StorageStats {

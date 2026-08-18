@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import * as api from '../lib/api'
 import { buildFileName } from '../lib/normalize'
 import { toSheetRows, toXlsx } from '../lib/export'
+import { printRows } from '../lib/printView'
 import { OUTPUT_COLUMNS, type Invoice, type Master, type Row } from '../lib/types'
 
 interface Props {
@@ -17,39 +18,45 @@ interface Col {
   key: string
   label: string
   width: number
-  /** combo = 목록에서 고르되 직접 입력·새 값 추가도 되는 칸 */
-  kind: 'text' | 'num' | 'combo' | 'readonly'
+  /**
+   * select = 정해진 값 중에서 고른다. 목록에 없는 값이 필요하면 '직접 입력…' 으로
+   *          전환해 새 값을 넣을 수 있다.
+   */
+  kind: 'text' | 'num' | 'select' | 'readonly'
   get: (r: Row) => string
   set?: (r: Row, v: string) => Row
   options?: (m: Master) => string[]
 }
 
+/** 목록에 없는 값을 직접 넣겠다는 표시. */
+const CUSTOM = '\u0000custom'
+
 const COLS: Col[] = [
   { key: 'date', label: 'DATE', width: 100, kind: 'text', get: (r) => r.date, set: (r, v) => ({ ...r, date: v }) },
   { key: 'invoiceNumber', label: 'Invoice_number', width: 136, kind: 'text', get: (r) => r.invoiceNumber, set: (r, v) => ({ ...r, invoiceNumber: v }) },
   {
-    key: 'vendorName', label: 'Vendor_name', width: 200, kind: 'combo',
+    key: 'vendorName', label: 'Vendor_name', width: 200, kind: 'select',
     get: (r) => r.vendorName, set: (r, v) => ({ ...r, vendorName: v }),
     options: (m) => m.vendors.map((v) => v.canonicalName),
   },
   {
-    key: 'coa', label: 'COA', width: 190, kind: 'combo',
+    key: 'coa', label: 'COA', width: 190, kind: 'select',
     get: (r) => r.coa, set: (r, v) => ({ ...r, coa: v }),
     options: (m) => m.coa,
   },
   { key: 'amount', label: 'AMT', width: 100, kind: 'num', get: (r) => r.amount.toFixed(2), set: (r, v) => ({ ...r, amount: toNum(v) }) },
   {
-    key: 'payment', label: 'PAYMENT', width: 96, kind: 'combo',
+    key: 'payment', label: 'PAYMENT', width: 96, kind: 'select',
     get: (r) => r.payment, set: (r, v) => ({ ...r, payment: v as Row['payment'] }),
     options: () => ['CARD', 'CHECK', 'ACH'],
   },
   {
-    key: 'cardId', label: 'CARD_ID', width: 110, kind: 'combo',
+    key: 'cardId', label: 'CARD_ID', width: 110, kind: 'select',
     get: (r) => r.cardId, set: (r, v) => ({ ...r, cardId: v }),
     options: (m) => m.cards.map((c) => c.cardId),
   },
   {
-    key: 'location', label: 'LOCATION', width: 100, kind: 'combo',
+    key: 'location', label: 'LOCATION', width: 100, kind: 'select',
     get: (r) => r.location, set: (r, v) => ({ ...r, location: v.toUpperCase() }),
     options: (m) => m.locations.map((l) => l.code),
   },
@@ -73,6 +80,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [focusPages, setFocusPages] = useState<number[] | null>(null)
+  // '직접 입력…' 으로 전환한 칸들 (행id:컬럼키)
+  const [freeform, setFreeform] = useState<Set<string>>(new Set())
 
   const view = useMemo(() => {
     let out = rows
@@ -153,15 +162,18 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
     setTimeout(() => setToast(null), 1800)
   }
 
-  const saveXlsx = () => {
-    const blob = new Blob([toXlsx(targets) as unknown as BlobPart], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `invoices-${new Date().toISOString().slice(0, 10)}.xlsx`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  const saveXlsx = async () => {
+    setError(null)
+    try {
+      const name = `invoices-${new Date().toISOString().slice(0, 10)}.xlsx`
+      const saved = await api.saveFileAs(name, toXlsx(targets))
+      if (saved) {
+        setToast(`${targets.length}행을 엑셀 파일로 저장했습니다`)
+        setTimeout(() => setToast(null), 2500)
+      }
+    } catch (err) {
+      setError(String(err))
+    }
   }
 
   const mismatches = invoices.filter((i) => i.splitCheck === 'mismatch')
@@ -199,7 +211,15 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
         <button onClick={() => copy(true)} title="첫 줄에 컬럼 이름을 붙여서 복사">
           헤더 포함
         </button>
-        <button onClick={saveXlsx}>.xlsx</button>
+        <button onClick={saveXlsx} title="보이는 행(또는 선택한 행)을 엑셀 파일로 저장합니다">
+          엑셀로 저장
+        </button>
+        <button
+          onClick={() => printRows(targets, 'Invoice Extractor')}
+          title="인쇄 대화상자에서 'PDF로 저장'을 고르면 PDF 가 됩니다"
+        >
+          PDF로 저장
+        </button>
         <button
           disabled={saving}
           title="검토가 끝난 행을 장부에 넣습니다. 인터넷 없이도 저장됩니다."
@@ -305,15 +325,61 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
                     )
                   }
 
-                  // combo 는 목록에서 고르는 것도, 새 값을 직접 입력하는 것도 된다.
+                  if (c.kind === 'select') {
+                    const opts = c.options!(master)
+                    const val = c.get(r)
+                    const cellKey = `${r.id}:${c.key}`
+                    // 목록에 없는 값이거나 사용자가 직접 입력을 고른 칸은 입력창으로 바꾼다.
+                    const typing = freeform.has(cellKey) || (val !== '' && !opts.includes(val))
+
+                    return (
+                      <td key={c.key} className={cls}>
+                        {typing ? (
+                          <input
+                            autoFocus={freeform.has(cellKey)}
+                            value={val}
+                            placeholder="새 값 입력"
+                            onChange={(ev) => edit(r.id, c, ev.target.value)}
+                            onBlur={() => {
+                              // 비운 채로 벗어나면 다시 목록으로 돌아간다.
+                              if (!c.get(r)) {
+                                const n = new Set(freeform)
+                                n.delete(cellKey)
+                                setFreeform(n)
+                              }
+                            }}
+                          />
+                        ) : (
+                          <select
+                            value={val}
+                            title={fromTable ? '인보이스에 없어서 매핑 기준표에서 채운 값입니다' : undefined}
+                            onChange={(ev) => {
+                              if (ev.target.value === CUSTOM) {
+                                setFreeform(new Set(freeform).add(cellKey))
+                                return
+                              }
+                              edit(r.id, c, ev.target.value)
+                            }}
+                          >
+                            <option value="">
+                              {r.needsReview.includes(c.key) ? '— 확인 필요 —' : '—'}
+                            </option>
+                            {opts.map((o) => (
+                              <option key={o} value={o}>{o}</option>
+                            ))}
+                            <option value={CUSTOM}>직접 입력…</option>
+                          </select>
+                        )}
+                      </td>
+                    )
+                  }
+
                   return (
                     <td key={c.key} className={cls}>
                       <input
-                        list={c.kind === 'combo' ? `opts-${c.key}` : undefined}
                         className={c.key === 'invoiceNumber' ? 'mono' : undefined}
                         value={c.get(r)}
                         placeholder={r.needsReview.includes(c.key) ? '확인 필요' : ''}
-                        title={fromTable ? '인보이스에 없어서 매핑 기준표에서 채운 값입니다' : undefined}
                         onChange={(ev) => edit(r.id, c, ev.target.value)}
                       />
                     </td>
@@ -332,18 +398,10 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews }: Pr
         </table>
       </div>
 
-      {/* 목록은 제안일 뿐이고, 없는 값을 직접 타이핑해도 그대로 들어간다. */}
-      {COLS.filter((c) => c.kind === 'combo').map((c) => (
-        <datalist key={c.key} id={`opts-${c.key}`}>
-          {c.options!(master).map((o) => (
-            <option key={o} value={o} />
-          ))}
-        </datalist>
-      ))}
 
       <div className="small muted" style={{ marginTop: 6 }}>
         왼쪽 체크박스로 행 선택 · Shift+클릭으로 여러 행 한 번에 · 아무것도 선택 안 하면 보이는 행
-        전체가 대상입니다 · 목록에 없는 값은 칸에 직접 입력하면 됩니다
+        전체가 대상입니다 · 목록에 없는 값이 필요하면 '직접 입력…' 을 고르세요
         <span style={{ marginLeft: 10 }}>
           <span className="legend review" /> 확인 필요
           <span className="legend table" /> 매핑에서 채움

@@ -288,3 +288,38 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
 }
 .step.on { border-color: var(--accent); color: var(--text); }
 .step.done { border-color: rgba(34, 197, 94, 0.4); color: var(--ok); }
+
+/* ── 인쇄(PDF 저장) ── */
+
+#print-root { display: none; }
+
+@media print {
+  /* 화면 UI 는 감추고 표만 남긴다 */
+  .app { display: none !important; }
+
+  #print-root {
+    display: block;
+    color: #000;
+    background: #fff;
+    font: 9px/1.35 -apple-system, 'Segoe UI', 'Noto Sans KR', sans-serif;
+  }
+  #print-root .ph { margin-bottom: 10px; }
+  #print-root h1 { font-size: 14px; margin: 0 0 3px; }
+  #print-root .meta { font-size: 9px; color: #555; }
+
+  #print-root table { width: 100%; border-collapse: collapse; }
+  #print-root th, #print-root td {
+    border: 1px solid #bbb;
+    padding: 3px 4px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  #print-root th { background: #eee; font-weight: 600; }
+  #print-root td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  #print-root td.wrap { white-space: normal; word-break: break-all; font-size: 8px; }
+  /* 페이지가 넘어가도 머리글이 반복되고 행이 잘리지 않게 한다 */
+  #print-root thead { display: table-header-group; }
+  #print-root tr { break-inside: avoid; }
+
+  @page { size: A4 landscape; margin: 10mm; }
+}

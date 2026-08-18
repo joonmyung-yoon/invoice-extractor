@@ -243,6 +243,44 @@ fn data_dir(state: State<AppState>) -> String {
     state.data_dir.to_string_lossy().to_string()
 }
 
+/// 파일을 저장 대화상자로 내보낸다.
+///
+/// 웹의 `<a download>` 는 Tauri 웹뷰에서 동작하지 않아 버튼을 눌러도 아무 일이 없었다.
+/// 저장 위치를 직접 고르게 하고 네이티브로 쓴다.
+#[tauri::command]
+async fn save_file_as(
+    app: tauri::AppHandle,
+    default_name: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let ext = std::path::Path::new(&default_name)
+        .extension()
+        .and_then(|x| x.to_str())
+        .unwrap_or("xlsx")
+        .to_string();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter(format!("{} 파일", ext.to_uppercase()), &[ext.as_str()])
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+
+    let Some(path) = rx.recv().map_err(|x| x.to_string())? else {
+        return Ok(None); // 사용자가 취소했다
+    };
+
+    let path = path
+        .into_path()
+        .map_err(|x| format!("저장 위치를 해석하지 못했습니다: {x}"))?;
+    std::fs::write(&path, bytes).map_err(|x| format!("저장에 실패했습니다: {x}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 // ── 저장 용량 ──────────────────────────────────────────────────────
 
 fn dir_size(path: &std::path::Path) -> u64 {
@@ -673,6 +711,7 @@ pub fn run() {
             get_setting,
             set_setting,
             data_dir,
+            save_file_as,
             storage_stats,
             clear_page_images,
             purge_jobs_before,

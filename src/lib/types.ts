@@ -1,4 +1,9 @@
 // 시트 출력 컬럼(예시 파일과 동일한 순서). 빈 칸으로 두는 컬럼도 형식을 맞추기 위해 유지한다.
+// 샘플 파일(samples/invoice_extract_example.xlsx)의 헤더를 글자 그대로 옮긴 것.
+//
+// 주의: 원본 헤더가 실제 내용과 어긋나 있다. O열은 'FileName' 이라고 적혀 있지만
+// 지점 코드(STN/ODG/…)가 들어가고, P열은 헤더가 비어 있는데 진짜 파일명이 들어간다.
+// 기존 시트에 그대로 붙여넣어야 하므로 이 표기를 고치지 않고 유지한다.
 export const OUTPUT_COLUMNS = [
   'No',
   'CORP',
@@ -14,9 +19,15 @@ export const OUTPUT_COLUMNS = [
   'PAYMENT',
   'PAID_DATE',
   'CARD_ID',
-  'LOCATION',
-  'FileName',
+  'FileName', // ← 실제로는 지점 코드가 들어간다
+  '',         // ← 실제로는 파일명이 들어간다
 ] as const
+
+/** 화면과 안내문에서 쓰는 사람이 읽을 수 있는 컬럼 이름. */
+export const COLUMN_LABELS: Record<string, string> = {
+  FileName: 'LOCATION',
+  '': 'FileName',
+}
 
 export type Payment = 'CARD' | 'CHECK' | 'ACH'
 
