@@ -510,7 +510,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                             }}
                           >
                             <option value="">
-                              {r.needsReview.includes(c.key) ? '— 확인 필요 —' : '—'}
+                              —
                             </option>
                             {opts.map((o) => (
                               <option key={o} value={o}>{o}</option>
@@ -527,7 +527,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                       <input
                         className={c.key === 'invoiceNumber' ? 'mono' : undefined}
                         value={c.get(r, rowIndex)}
-                        placeholder={r.needsReview.includes(c.key) ? '확인 필요' : ''}
+                        placeholder={r.needsReview.includes(c.key) ? '?' : ''}
                         onChange={(ev) => edit(r.id, c, ev.target.value)}
                       />
                     </td>

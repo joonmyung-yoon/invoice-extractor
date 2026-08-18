@@ -444,3 +444,7 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
   word-break: break-all;
 }
 .review .viewer { height: 100%; }
+
+/* 드롭다운이 가장 긴 항목 길이만큼 칸을 밀어내지 않게 한다 */
+.sheet td select, .sheet td input { min-width: 0; max-width: 100%; }
+.sheet td select { text-overflow: ellipsis; }
