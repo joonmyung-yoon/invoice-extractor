@@ -4,6 +4,8 @@
 //! MCP 서버는 전부 차단하고, 허용 도구도 Read/Write 로 묶어 작업 폴더 밖으로 못 나가게 한다.
 
 use anyhow::{anyhow, bail, Context, Result};
+use serde::Serialize;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -43,6 +45,25 @@ pub fn resolve_cli(configured: Option<&str>) -> Result<PathBuf> {
 
 pub struct RunOutcome {
     pub extracted_json: String,
+    pub elapsed_ms: u128,
+}
+
+/// 추출 도중 화면에 보낼 진행 상황.
+///
+/// 예전에는 "시작"과 "완료" 두 상태뿐이라 몇 분 동안 아무것도 알 수 없었다.
+/// claude 가 내보내는 작업 이벤트를 그대로 옮겨 실제로 진행 중임을 보여준다.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub job_id: String,
+    /// 지금까지 읽은 페이지 수
+    pub pages_read: usize,
+    /// 방금 읽은 페이지 번호 (파일명에서 뽑는다)
+    pub current_page: Option<usize>,
+    /// 사람이 읽을 수 있는 현재 단계
+    pub phase: String,
+    /// 결과 파일을 쓰기 시작했는지
+    pub writing: bool,
     pub elapsed_ms: u128,
 }
 
@@ -90,13 +111,25 @@ fn kill_pid(pid: u32) {
         .status();
 }
 
+/// 파일 경로에서 pageNN 의 번호를 뽑는다.
+fn page_number(path: &str) -> Option<usize> {
+    let name = path.rsplit(['/', '\\']).next()?;
+    let rest = name.strip_prefix("page")?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
 /// `workdir` 안에서 claude 를 돌린다. 프롬프트는 결과를 `extracted.json` 에 쓰도록 지시되어 있어야 한다.
+///
+/// `on_progress` 는 claude 가 작업할 때마다 호출된다.
 pub fn run_extraction(
     cli: &Path,
     workdir: &Path,
     prompt: &str,
     timeout: Duration,
     running: &Running,
+    job_id: &str,
+    on_progress: impl Fn(Progress) + Send + 'static,
 ) -> Result<RunOutcome> {
     let out_path = workdir.join("extracted.json");
     let _ = std::fs::remove_file(&out_path);
@@ -116,6 +149,10 @@ pub fn run_extraction(
         .arg("--strict-mcp-config")
         .arg("--mcp-config")
         .arg("{\"mcpServers\":{}}")
+        // 작업 이벤트를 한 줄에 하나씩 받아 진행 상황을 알아낸다.
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -124,6 +161,77 @@ pub fn run_extraction(
 
     let pid = child.id();
     running.add(pid);
+
+    // stdout 을 별도 스레드에서 읽는다. 파이프가 가득 차면 claude 가 멈추므로
+    // 프로세스를 기다리는 동안에도 계속 비워 줘야 한다.
+    let stdout = child.stdout.take().expect("stdout 파이프");
+    let job = job_id.to_string();
+    let reader = std::thread::spawn(move || {
+        let mut pages_read = 0usize;
+        let mut seen = std::collections::HashSet::new();
+        let mut writing = false;
+        let mut last_text = String::new();
+
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let Ok(ev) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+
+            let mut changed = false;
+            let mut current_page = None;
+
+            if ev["type"] == "assistant" {
+                if let Some(content) = ev["message"]["content"].as_array() {
+                    for c in content {
+                        match c["type"].as_str() {
+                            Some("tool_use") => {
+                                let name = c["name"].as_str().unwrap_or("");
+                                let path = c["input"]["file_path"].as_str().unwrap_or("");
+                                if name == "Read" {
+                                    if let Some(n) = page_number(path) {
+                                        // 같은 페이지를 다시 읽는 경우는 세지 않는다.
+                                        if seen.insert(n) {
+                                            pages_read += 1;
+                                            current_page = Some(n);
+                                            changed = true;
+                                        }
+                                    }
+                                } else if name == "Write" && path.ends_with("extracted.json") {
+                                    writing = true;
+                                    changed = true;
+                                }
+                            }
+                            Some("text") => {
+                                let t = c["text"].as_str().unwrap_or("").trim();
+                                if !t.is_empty() {
+                                    last_text = t.chars().take(80).collect();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            if changed {
+                let phase = if writing {
+                    "결과 정리 중".to_string()
+                } else if pages_read > 0 {
+                    format!("페이지 {pages_read}장 확인함")
+                } else {
+                    last_text.clone()
+                };
+                on_progress(Progress {
+                    job_id: job.clone(),
+                    pages_read,
+                    current_page,
+                    phase,
+                    writing,
+                    elapsed_ms: started.elapsed().as_millis(),
+                });
+            }
+        }
+    });
 
     // 무한정 매달리지 않도록 폴링하며 기다린다.
     let deadline = std::time::Instant::now() + timeout;
@@ -145,15 +253,17 @@ pub fn run_extraction(
         }
     }
     running.remove(pid);
+    let _ = reader.join();
 
-    let output = child.wait_with_output()?;
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let mut stderr = String::new();
+    if let Some(mut e) = child.stderr.take() {
+        use std::io::Read;
+        let _ = e.read_to_string(&mut stderr);
+    }
 
     if !out_path.is_file() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
         return Err(anyhow!(
-            "extracted.json 이 생성되지 않았습니다.\nstdout: {}\nstderr: {}",
-            stdout.chars().take(2000).collect::<String>(),
+            "extracted.json 이 생성되지 않았습니다.\nstderr: {}",
             stderr.chars().take(2000).collect::<String>()
         ));
     }
@@ -176,4 +286,17 @@ pub fn health_check(cli: &Path) -> Result<String> {
         bail!("claude --version 이 실패했습니다: {}", String::from_utf8_lossy(&output.stderr));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::page_number;
+
+    #[test]
+    fn extracts_page_numbers_from_paths() {
+        assert_eq!(page_number("/tmp/job/page07.png"), Some(7));
+        assert_eq!(page_number(r"C:\jobs\x\page19.png"), Some(19));
+        assert_eq!(page_number("/tmp/job/extracted.json"), None);
+        assert_eq!(page_number("/tmp/page.png"), None);
+    }
 }

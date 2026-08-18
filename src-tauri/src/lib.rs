@@ -7,7 +7,7 @@ use anyhow::Result;
 use base64::Engine;
 use std::path::PathBuf;
 use std::time::Duration;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 /// anyhow 에러를 프런트에 문자열로 넘기기 위한 얇은 래퍼.
 fn e(err: anyhow::Error) -> String {
@@ -88,6 +88,7 @@ fn stage_pages(
 
 #[tauri::command]
 async fn run_extraction(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     job_id: String,
     prompt: String,
@@ -101,10 +102,22 @@ async fn run_extraction(
 
     let cli = claude::resolve_cli(configured.as_deref()).map_err(e)?;
     let running = state.running_handle();
+    let id = job_id.clone();
 
     // claude 실행은 블로킹이라 별도 스레드로 뺀다.
     let outcome = tauri::async_runtime::spawn_blocking(move || {
-        claude::run_extraction(&cli, &workdir, &prompt, Duration::from_secs(timeout_secs), &running)
+        claude::run_extraction(
+            &cli,
+            &workdir,
+            &prompt,
+            Duration::from_secs(timeout_secs),
+            &running,
+            &id,
+            // 추출이 몇 분씩 걸리므로 진행 상황을 그때그때 화면으로 보낸다.
+            move |p| {
+                let _ = app.emit("extraction-progress", p);
+            },
+        )
     })
     .await
     .map_err(|x| x.to_string())?

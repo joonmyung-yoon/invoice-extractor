@@ -18,6 +18,10 @@ export interface ExtractionState {
   startedAt: number | null
   elapsed: number
   error: string | null
+  /** claude 가 지금까지 확인한 페이지 수 (추출 단계) */
+  pagesRead: number
+  /** 현재 무엇을 하고 있는지 */
+  phase: string
   rows: Row[]
   invoices: Invoice[]
   previews: string[]
@@ -33,6 +37,8 @@ const INITIAL: ExtractionState = {
   startedAt: null,
   elapsed: 0,
   error: null,
+  pagesRead: 0,
+  phase: '',
   rows: [],
   invoices: [],
   previews: [],
@@ -73,4 +79,12 @@ export const extraction = {
 
 export function useExtraction(): ExtractionState {
   return useSyncExternalStore(extraction.subscribe, extraction.get)
+}
+
+/** 초를 "1분 20초" 처럼 읽기 쉽게 만든다. */
+export function fmtElapsed(sec: number): string {
+  if (sec < 60) return `${sec}초`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return s ? `${m}분 ${s}초` : `${m}분`
 }

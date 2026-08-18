@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { Master, Payment, VendorRule } from './types'
 
 // ── claude ────────────────────────────────────────────────────────
@@ -10,6 +11,19 @@ export const stagePages = (jobId: string, pagesBase64: string[]) =>
 
 export const runExtraction = (jobId: string, prompt: string, timeoutSecs = 900) =>
   invoke<{ result: unknown; elapsedMs: number }>('run_extraction', { jobId, prompt, timeoutSecs })
+
+export interface ExtractionProgress {
+  jobId: string
+  pagesRead: number
+  currentPage: number | null
+  phase: string
+  writing: boolean
+  elapsedMs: number
+}
+
+/** 추출 중 진행 상황을 구독한다. 해제 함수를 돌려준다. */
+export const onExtractionProgress = (fn: (p: ExtractionProgress) => void) =>
+  listen<ExtractionProgress>('extraction-progress', (e) => fn(e.payload))
 
 // ── jobs ──────────────────────────────────────────────────────────
 

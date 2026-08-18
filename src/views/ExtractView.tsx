@@ -1,9 +1,9 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as api from '../lib/api'
 import { loadPdf } from '../lib/pdf'
 import { buildPrompt } from '../lib/defaultPrompt'
 import { checkPageCoverage, normalize } from '../lib/normalize'
-import { extraction, useExtraction } from '../lib/extractionStore'
+import { extraction, fmtElapsed, useExtraction } from '../lib/extractionStore'
 import { RowsTable } from './RowsTable'
 import type { Master, Prompt, Row } from '../lib/types'
 
@@ -16,7 +16,24 @@ interface Props {
 export function ExtractView({ master, prompt, onDone }: Props) {
   const st = useExtraction()
   const [over, setOver] = useState(false)
+  const [tick, setTick] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // 추출은 몇 분씩 걸린다. claude 가 페이지를 하나씩 읽을 때마다 알려 준다.
+  useEffect(() => {
+    const un = api.onExtractionProgress((p) => {
+      if (p.jobId !== extraction.get().jobId) return
+      extraction.set({ pagesRead: p.pagesRead, phase: p.phase })
+    })
+    return () => void un.then((f) => f())
+  }, [])
+
+  // 멈춘 것처럼 보이지 않게 경과 시간을 1초마다 다시 그린다.
+  useEffect(() => {
+    if (st.stage !== 'extracting' && st.stage !== 'rendering') return
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [st.stage])
 
   const start = async (file: File) => {
     if (!prompt) {
@@ -24,7 +41,9 @@ export function ExtractView({ master, prompt, onDone }: Props) {
       return
     }
     extraction.reset()
-    extraction.set({ stage: 'rendering', pdfName: file.name, startedAt: Date.now() })
+    extraction.set({
+      stage: 'rendering', pdfName: file.name, startedAt: Date.now(), pagesRead: 0, phase: '',
+    })
 
     let jobId: string | null = null
     try {
@@ -87,6 +106,23 @@ export function ExtractView({ master, prompt, onDone }: Props) {
 
   const busy = st.stage === 'rendering' || st.stage === 'extracting'
 
+  // tick 은 1초마다 다시 그리기 위한 것이라 값 자체는 쓰지 않는다.
+  void tick
+  const elapsedSec = st.startedAt ? Math.round((Date.now() - st.startedAt) / 1000) : 0
+  const total = Math.max(1, st.progress.total)
+
+  // 변환이 전체의 앞 20%, 추출이 나머지 80% 를 차지한다고 본다.
+  const pct =
+    st.stage === 'rendering'
+      ? (st.progress.done / total) * 20
+      : 20 + Math.min(st.pagesRead / total, 1) * 78
+
+  // 지금까지 페이지당 걸린 시간으로 남은 시간을 어림한다.
+  const remainSec =
+    st.stage === 'extracting' && st.pagesRead > 0
+      ? Math.max(0, Math.round((elapsedSec / st.pagesRead) * (total - st.pagesRead)))
+      : null
+
   return (
     <>
       <h2>추출</h2>
@@ -144,25 +180,32 @@ export function ExtractView({ master, prompt, onDone }: Props) {
         <div className="panel">
           <div className="row" style={{ marginBottom: 8 }}>
             <b>{st.pdfName}</b>
+            <span className="badge">{st.progress.total}페이지</span>
             <span className="spacer" />
-            <span className="muted small">
-              {st.stage === 'rendering'
-                ? `페이지 변환 ${st.progress.done}/${st.progress.total}`
-                : `Claude Code 추출 중… (${st.progress.total}페이지, 보통 페이지당 10~15초)`}
+            <span className="mono small">{fmtElapsed(elapsedSec)}</span>
+          </div>
+
+          <div className="progress" style={{ marginBottom: 8 }}>
+            <div style={{ width: `${pct}%` }} />
+          </div>
+
+          <div className="row small">
+            <span className={`step ${st.stage === 'rendering' ? 'on' : 'done'}`}>
+              1. 페이지 변환 {st.stage === 'rendering' ? `${st.progress.done}/${st.progress.total}` : '완료'}
+            </span>
+            <span className={`step ${st.stage === 'extracting' ? 'on' : ''}`}>
+              2. 인보이스 읽는 중 {st.stage === 'extracting' && `${st.pagesRead}/${st.progress.total}`}
             </span>
           </div>
-          <div className="progress">
-            <div
-              style={{
-                width:
-                  st.stage === 'rendering'
-                    ? `${(st.progress.done / Math.max(1, st.progress.total)) * 100}%`
-                    : '100%',
-                opacity: st.stage === 'extracting' ? 0.5 : 1,
-              }}
-            />
-          </div>
-          <p className="muted small" style={{ margin: '8px 0 0' }}>
+
+          {st.stage === 'extracting' && (
+            <p className="muted small" style={{ margin: '8px 0 0' }}>
+              {st.phase || 'Claude Code 가 첫 페이지를 여는 중입니다…'}
+              {st.pagesRead > 0 && remainSec !== null && ` · 남은 시간 약 ${fmtElapsed(remainSec)}`}
+            </p>
+          )}
+
+          <p className="muted small" style={{ margin: '6px 0 0' }}>
             다른 탭으로 옮겨도 계속 진행됩니다. 앱을 완전히 종료하면 중단됩니다.
           </p>
         </div>

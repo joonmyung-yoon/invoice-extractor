@@ -278,3 +278,13 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
 .legend.review { background: rgba(245, 158, 11, 0.6); }
 .legend.table { background: #6366f1; }
 .legend.edited { background: var(--accent); }
+
+/* 추출 진행 단계 표시 */
+.step {
+  padding: 2px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.step.on { border-color: var(--accent); color: var(--text); }
+.step.done { border-color: rgba(34, 197, 94, 0.4); color: var(--ok); }
