@@ -147,7 +147,8 @@ export function HistoryView({ master, reloadKey }: Props) {
                         setRetrying(true)
                         try {
                           await api.setJobStatus(sel.id, 'extracting')
-                          const { result } = await api.runExtraction(sel.id, sel.promptSnapshot)
+                          // 예전 기록은 조각을 나누기 전에 만든 것이라 0번 조각만 있다.
+                          const { result } = await api.runExtraction(sel.id, 0, sel.promptSnapshot)
                           const norm = normalize(result, master)
                           await api.saveJobPayload(sel.id, {
                             raw: result,

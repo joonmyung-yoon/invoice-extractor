@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { extraction, fmtElapsed, useExtraction, type Job } from '../lib/extractionStore'
+import { runJob } from '../lib/runner'
 import * as api from '../lib/api'
-import { loadPdf } from '../lib/pdf'
-import { buildPrompt } from '../lib/defaultPrompt'
-import { checkPageCoverage, normalize } from '../lib/normalize'
-import { extraction, fmtElapsed, useExtraction } from '../lib/extractionStore'
 import { RowsTable } from './RowsTable'
 import type { Master, Prompt, Row } from '../lib/types'
 
@@ -16,125 +14,69 @@ interface Props {
 export function ExtractView({ master, prompt, onDone }: Props) {
   const st = useExtraction()
   const [over, setOver] = useState(false)
-  const [tick, setTick] = useState(0)
+  const [, force] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
+  const startedRef = useRef(new Set<string>())
 
-  // 추출은 몇 분씩 걸린다. claude 가 페이지를 하나씩 읽을 때마다 알려 준다.
+  // 경과 시간이 멈춘 것처럼 보이지 않게 1초마다 다시 그린다.
   useEffect(() => {
-    const un = api.onExtractionProgress((p) => {
-      if (p.jobId !== extraction.get().jobId) return
-      extraction.set({ pagesRead: p.pagesRead, phase: p.phase })
-    })
-    return () => void un.then((f) => f())
-  }, [])
+    if (!st.jobs.some((j) => j.stage === 'rendering' || j.stage === 'extracting')) return
+    const t = setInterval(() => force((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [st.jobs])
 
-  // 멈춘 것처럼 보이지 않게 경과 시간을 1초마다 다시 그린다.
+  // 큐를 돌린다. 동시에 도는 건수를 넘지 않게 하나씩 꺼내 시작한다.
   useEffect(() => {
-    if (st.stage !== 'extracting' && st.stage !== 'rendering') return
-    const id = setInterval(() => setTick((t) => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [st.stage])
+    if (!prompt) return
+    const active = st.jobs.filter((j) => j.stage === 'rendering' || j.stage === 'extracting').length
+    if (active >= st.concurrency) return
 
-  const start = async (file: File) => {
-    if (!prompt) {
-      extraction.set({ error: '사용할 프롬프트가 없습니다. 프롬프트 화면에서 하나를 선택해 주세요.', stage: 'error' })
-      return
-    }
-    extraction.reset()
-    extraction.set({
-      stage: 'rendering', pdfName: file.name, startedAt: Date.now(), pagesRead: 0, phase: '',
-    })
+    const next = st.jobs.find((j) => j.stage === 'queued' && !startedRef.current.has(j.id))
+    if (!next) return
 
-    let jobId: string | null = null
-    try {
-      const bytes = await file.arrayBuffer()
-      const pdf = await loadPdf(bytes)
-      extraction.set({ progress: { done: 0, total: pdf.pageCount } })
+    startedRef.current.add(next.id)
 
-      const body = buildPrompt(prompt.body, master)
-      jobId = await api.createJob({
-        pdfName: file.name,
-        pdfPath: file.name,
-        pageCount: pdf.pageCount,
-        promptId: prompt.id,
-        promptSnapshot: body,
-      })
-      extraction.set({ jobId })
+    // 동시에 띄우는 claude 프로세스 총량을 일정하게 유지한다.
+    // 너무 많이 띄우면 서로 느려지고 사용량 한도에도 걸린다(실측: 4개 동시에서
+    // 개당 처리 속도가 2배 넘게 떨어졌다).
+    const pending = st.jobs.filter(
+      (j) => j.stage === 'queued' || j.stage === 'rendering' || j.stage === 'extracting',
+    ).length
+    const chunks = pending <= 1 ? 4 : Math.max(1, Math.floor(4 / st.concurrency))
+    void runJob(next, master, prompt, chunks).then(onDone)
+  }, [st.jobs, st.concurrency, prompt, master])
 
-      // 원본을 보관해 둬야 나중에 크게 확대해도 선명하게 대조할 수 있다.
-      await api.storePdf(jobId, new Uint8Array(bytes)).catch(() => {})
-
-      const base64: string[] = []
-      const urls: string[] = []
-      for (let p = 1; p <= pdf.pageCount; p++) {
-        const img = await pdf.render(p)
-        base64.push(img.data)
-        urls.push(img.previewUrl)
-        extraction.set({ progress: { done: p, total: pdf.pageCount }, previews: [...urls] })
-      }
-      pdf.destroy()
-
-      await api.stagePages(jobId, base64)
-
-      extraction.set({ stage: 'extracting' })
-      await api.setJobStatus(jobId, 'extracting')
-      const { result } = await api.runExtraction(jobId, body)
-
-      const norm = normalize(result, master)
-      const cov = checkPageCoverage(norm.invoices, pdf.pageCount)
-
-      await api.saveJobPayload(jobId, { raw: result, rows: norm.rows, invoices: norm.invoices })
-
-      extraction.set({
-        stage: 'done',
-        raw: result,
-        rows: norm.rows,
-        invoices: norm.invoices,
-        unknownVendors: norm.unknownVendors,
-        coverage: cov.ok ? null : { missing: cov.missing, duplicated: cov.duplicated },
-        elapsed: Math.round((Date.now() - (extraction.get().startedAt ?? Date.now())) / 1000),
-      })
-      onDone()
-    } catch (err) {
-      extraction.set({ stage: 'error', error: String(err) })
-      if (jobId) await api.setJobStatus(jobId, 'error', String(err)).catch(() => {})
-    }
+  const add = (files: FileList | File[]) => {
+    const pdfs = Array.from(files).filter(
+      (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+    )
+    if (!pdfs.length) return
+    extraction.enqueue(pdfs)
   }
+
+  const selected = st.jobs.find((j) => j.id === st.selectedId) ?? null
+  const busy = st.jobs.some((j) => j.stage === 'rendering' || j.stage === 'extracting')
 
   const persist = async (next: Row[]) => {
-    extraction.set({ rows: next })
-    const id = extraction.get().jobId
-    if (id) {
-      // raw 를 같이 넘기지 않으면 원본이 지워져 나중에 매핑을 다시 적용할 수 없다.
-      const st = extraction.get()
-      await api.saveJobPayload(id, { raw: st.raw, rows: next, invoices: st.invoices }).catch(() => {})
+    if (!selected) return
+    extraction.patch(selected.id, { rows: next })
+    if (selected.jobId) {
+      await api
+        .saveJobPayload(selected.jobId, {
+          raw: selected.raw,
+          rows: next,
+          invoices: selected.invoices,
+        })
+        .catch(() => {})
     }
   }
-
-  const busy = st.stage === 'rendering' || st.stage === 'extracting'
-
-  // tick 은 1초마다 다시 그리기 위한 것이라 값 자체는 쓰지 않는다.
-  void tick
-  const elapsedSec = st.startedAt ? Math.round((Date.now() - st.startedAt) / 1000) : 0
-  const total = Math.max(1, st.progress.total)
-
-  // 변환이 전체의 앞 20%, 추출이 나머지 80% 를 차지한다고 본다.
-  const pct =
-    st.stage === 'rendering'
-      ? (st.progress.done / total) * 20
-      : 20 + Math.min(st.pagesRead / total, 1) * 78
-
-  // 지금까지 페이지당 걸린 시간으로 남은 시간을 어림한다.
-  const remainSec =
-    st.stage === 'extracting' && st.pagesRead > 0
-      ? Math.max(0, Math.round((elapsedSec / st.pagesRead) * (total - st.pagesRead)))
-      : null
 
   return (
     <>
       <h2>추출</h2>
       <p className="sub">
-        PDF 를 올리면 페이지를 이미지로 변환해 로컬 Claude Code 에 넘깁니다. 대화 세션은 남지 않습니다.
+        PDF 를 여러 개 올려도 됩니다. 큐에 쌓아 두고 순서대로 처리하며, 다른 탭으로 옮겨도 계속
+        진행됩니다.
       </p>
 
       {!master.vendors.length && (
@@ -144,106 +86,85 @@ export function ExtractView({ master, prompt, onDone }: Props) {
         </div>
       )}
 
-      {(st.stage === 'idle' || st.stage === 'error') && (
-        <>
-          <div
-            className={`drop ${over ? 'over' : ''}`}
-            onClick={() => fileRef.current?.click()}
-            onDragOver={(ev) => {
-              ev.preventDefault()
-              setOver(true)
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(ev) => {
-              ev.preventDefault()
-              setOver(false)
-              const f = ev.dataTransfer.files[0]
-              if (f?.type === 'application/pdf' || f?.name.toLowerCase().endsWith('.pdf')) void start(f)
-              else extraction.set({ error: 'PDF 파일만 올릴 수 있습니다.', stage: 'error' })
-            }}
+      <div
+        className={`drop compact ${over ? 'over' : ''}`}
+        onClick={() => fileRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setOver(false)
+          add(e.dataTransfer.files)
+        }}
+      >
+        <div>PDF 를 여기에 놓거나 클릭해서 선택 · 여러 개 한꺼번에 가능</div>
+        <div className="small">
+          프롬프트: {prompt ? prompt.name : '없음'} · 매핑 벤더 {master.vendors.length}개
+        </div>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files) add(e.target.files)
+          e.target.value = ''
+        }}
+      />
+
+      {st.jobs.length > 0 && (
+        <div className="row" style={{ margin: '10px 0' }}>
+          <label className="muted small">동시 처리</label>
+          <select
+            value={st.concurrency}
+            onChange={(e) => extraction.setConcurrency(Number(e.target.value))}
+            style={{ width: 130 }}
+            title="PDF 를 몇 건씩 동시에 처리할지. PDF 가 하나뿐이면 그 하나를 4조각으로 나눠 돌립니다."
           >
-            <div style={{ fontSize: 15, marginBottom: 6 }}>PDF 를 여기에 놓거나 클릭해서 선택</div>
-            <div className="small">
-              사용할 프롬프트: {prompt ? prompt.name : '없음'} · 매핑 벤더 {master.vendors.length}개
-            </div>
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            style={{ display: 'none' }}
-            onChange={(ev) => {
-              const f = ev.target.files?.[0]
-              if (f) void start(f)
-              ev.target.value = ''
-            }}
-          />
-        </>
-      )}
-
-      {st.error && <div className="alert err" style={{ whiteSpace: 'pre-wrap' }}>{st.error}</div>}
-
-      {busy && (
-        <div className="panel">
-          <div className="row" style={{ marginBottom: 8 }}>
-            <b>{st.pdfName}</b>
-            <span className="badge">{st.progress.total}페이지</span>
-            <span className="spacer" />
-            <span className="mono small">{fmtElapsed(elapsedSec)}</span>
-          </div>
-
-          <div className="progress" style={{ marginBottom: 8 }}>
-            <div style={{ width: `${pct}%` }} />
-          </div>
-
-          <div className="row small">
-            <span className={`step ${st.stage === 'rendering' ? 'on' : 'done'}`}>
-              1. 페이지 변환 {st.stage === 'rendering' ? `${st.progress.done}/${st.progress.total}` : '완료'}
-            </span>
-            <span className={`step ${st.stage === 'extracting' ? 'on' : ''}`}>
-              2. 인보이스 읽는 중 {st.stage === 'extracting' && `${st.pagesRead}/${st.progress.total}`}
-            </span>
-          </div>
-
-          {st.stage === 'extracting' && (
-            <p className="muted small" style={{ margin: '8px 0 0' }}>
-              {st.phase || 'Claude Code 가 첫 페이지를 여는 중입니다…'}
-              {st.pagesRead > 0 && remainSec !== null && ` · 남은 시간 약 ${fmtElapsed(remainSec)}`}
-            </p>
+            <option value={1}>1건씩</option>
+            <option value={2}>2건씩</option>
+            <option value={3}>3건씩</option>
+            <option value={4}>4건씩</option>
+          </select>
+          {busy && <span className="badge">{st.jobs.filter((j) => j.stage === 'queued').length}건 대기</span>}
+          <span className="spacer" />
+          {st.jobs.some((j) => j.stage === 'done' || j.stage === 'error') && (
+            <button onClick={() => extraction.clearFinished()}>끝난 것 목록에서 치우기</button>
           )}
-
-          <p className="muted small" style={{ margin: '6px 0 0' }}>
-            다른 탭으로 옮겨도 계속 진행됩니다. 앱을 완전히 종료하면 중단됩니다.
-          </p>
         </div>
       )}
 
-      {st.stage === 'done' && (
-        <>
-          <div className="row" style={{ marginBottom: 10 }}>
-            <b>{st.pdfName}</b>
-            <span className="badge">
-              {st.progress.total}페이지 → {st.invoices.length}건 / {st.rows.length}행
-            </span>
-            <span className="badge">{st.elapsed}초</span>
-            <span className="spacer" />
-            <button onClick={() => extraction.reset()}>새 PDF</button>
-          </div>
+      {st.jobs.map((j) => (
+        <JobCard
+          key={j.id}
+          job={j}
+          selected={j.id === st.selectedId}
+          onSelect={() => extraction.select(j.id)}
+        />
+      ))}
 
-          {st.coverage && (
+      {selected?.stage === 'done' && (
+        <>
+          {selected.coverage && (
             <div className="alert warn">
               페이지 처리에 빠진 곳이 있습니다.
-              {st.coverage.missing.length > 0 && ` 누락: ${st.coverage.missing.join(', ')}`}
-              {st.coverage.duplicated.length > 0 && ` 중복: ${st.coverage.duplicated.join(', ')}`}
+              {selected.coverage.missing.length > 0 && ` 누락: ${selected.coverage.missing.join(', ')}`}
+              {selected.coverage.duplicated.length > 0 &&
+                ` 중복: ${selected.coverage.duplicated.join(', ')}`}
             </div>
           )}
 
-          {st.unknownVendors.length > 0 && (
+          {selected.unknownVendors.length > 0 && (
             <div className="alert warn">
-              <b>매핑에 없는 벤더 {st.unknownVendors.length}곳</b> — 구글시트 Vendors 탭에 추가하면
-              다음부터 자동으로 채워집니다.
+              <b>매핑에 없는 벤더 {selected.unknownVendors.length}곳</b> — 구글시트 Vendors 탭에
+              추가하면 다음부터 자동으로 채워집니다.
               <div style={{ marginTop: 6 }}>
-                {st.unknownVendors.map((u) => (
+                {selected.unknownVendors.map((u) => (
                   <div key={u.name} className="row small" style={{ marginTop: 4 }}>
                     <span className="mono">{u.name}</span>
                     <span className="muted">p.{u.pages.join(',')}</span>
@@ -253,13 +174,13 @@ export function ExtractView({ master, prompt, onDone }: Props) {
                         api
                           .appendVendor([u.name, '', '', '', u.suggestedCoa, '자동 추가'])
                           .then(() =>
-                            extraction.set({
-                              unknownVendors: extraction
-                                .get()
-                                .unknownVendors.filter((y) => y.name !== u.name),
+                            extraction.patch(selected.id, {
+                              unknownVendors: selected.unknownVendors.filter(
+                                (y) => y.name !== u.name,
+                              ),
                             }),
                           )
-                          .catch((err) => extraction.set({ error: String(err) }))
+                          .catch(() => {})
                       }
                     >
                       시트에 추가
@@ -271,16 +192,114 @@ export function ExtractView({ master, prompt, onDone }: Props) {
           )}
 
           <RowsTable
-            rows={st.rows}
-            invoices={st.invoices}
+            rows={selected.rows}
+            invoices={selected.invoices}
             master={master}
             onChange={persist}
-            pageCount={st.progress.total}
-            pagePreviews={st.previews}
-            jobId={st.jobId}
+            pageCount={selected.pageCount}
+            pagePreviews={selected.previews}
+            jobId={selected.jobId}
           />
         </>
       )}
     </>
+  )
+}
+
+/** 작업 한 건의 진행 상황. */
+function JobCard({
+  job,
+  selected,
+  onSelect,
+}: {
+  job: Job
+  selected: boolean
+  onSelect: () => void
+}) {
+  const busy = job.stage === 'rendering' || job.stage === 'extracting'
+  const elapsed = job.startedAt
+    ? Math.round(((job.finishedAt ?? Date.now()) - job.startedAt) / 1000)
+    : 0
+  const total = Math.max(1, job.pageCount)
+
+  // 변환이 앞 20%, 추출이 나머지 78%.
+  const pct =
+    job.stage === 'queued'
+      ? 0
+      : job.stage === 'rendering'
+        ? (job.rendered / total) * 20
+        : job.stage === 'done'
+          ? 100
+          : 20 + Math.min(job.pagesRead / total, 1) * 78
+
+  // 페이지를 다 읽고도 결과가 안 나오는 구간이 길다. 그때 뭘 하는지 알려 준다.
+  const allRead = job.stage === 'extracting' && job.pagesRead >= job.pageCount && job.pageCount > 0
+  const remain =
+    job.stage === 'extracting' && job.pagesRead > 0 && !allRead
+      ? Math.round((elapsed / job.pagesRead) * (total - job.pagesRead))
+      : null
+
+  return (
+    <div
+      className={`panel jobcard ${selected ? 'sel' : ''} ${job.stage}`}
+      onClick={onSelect}
+      style={{ cursor: 'pointer' }}
+    >
+      <div className="row" style={{ marginBottom: busy ? 8 : 0 }}>
+        <b>{job.fileName}</b>
+        {job.pageCount > 0 && <span className="badge">{job.pageCount}페이지</span>}
+        {job.stage === 'queued' && <span className="badge">대기 중</span>}
+        {job.stage === 'done' && (
+          <span className="badge ok">
+            {job.invoices.length}건 / {job.rows.length}행
+          </span>
+        )}
+        {job.stage === 'error' && <span className="badge err">실패</span>}
+        <span className="spacer" />
+        {elapsed > 0 && <span className="mono small muted">{fmtElapsed(elapsed)}</span>}
+        <button
+          className="small"
+          style={{ padding: '2px 8px' }}
+          onClick={(e) => {
+            e.stopPropagation()
+            extraction.remove(job.id)
+          }}
+          title="목록에서 치웁니다. 저장된 이력은 남습니다."
+        >
+          ✕
+        </button>
+      </div>
+
+      {busy && (
+        <>
+          <div className="progress" style={{ marginBottom: 6 }}>
+            <div style={{ width: `${pct}%` }} />
+          </div>
+          <div className="row small">
+            <span className={`step ${job.stage === 'rendering' ? 'on' : 'done'}`}>
+              1. 페이지 변환{' '}
+              {job.stage === 'rendering' ? `${job.rendered}/${job.pageCount}` : '완료'}
+            </span>
+            <span className={`step ${job.stage === 'extracting' && !allRead ? 'on' : allRead ? 'done' : ''}`}>
+              2. 인보이스 읽는 중{' '}
+              {job.stage === 'extracting' && `${job.pagesRead}/${job.pageCount}`}
+            </span>
+            <span className={`step ${allRead ? 'on' : ''}`}>3. 정리·검산</span>
+          </div>
+          <div className="muted small" style={{ marginTop: 6 }}>
+            {allRead
+              ? '읽기를 마치고 인보이스를 묶어 표로 정리하는 중입니다. 조금 더 걸립니다.'
+              : job.phase || '시작하는 중…'}
+            {remain !== null && ` · 남은 시간 약 ${fmtElapsed(remain)}`}
+          </div>
+        </>
+      )}
+
+      {job.stage === 'error' && (
+        <div className="small" style={{ color: '#fca5a5', whiteSpace: 'pre-wrap', marginTop: 6 }}>
+          {job.error}
+        </div>
+      )}
+    </div>
   )
 }

@@ -6,11 +6,20 @@ import type { Master, Payment, VendorRule } from './types'
 
 export const claudeStatus = () => invoke<string>('claude_status')
 
-export const stagePages = (jobId: string, pagesBase64: string[]) =>
-  invoke<string>('stage_pages', { jobId, pagesBase64 })
+export const stagePages = (
+  jobId: string,
+  chunk: number,
+  pageNumbers: number[],
+  pagesBase64: string[],
+) => invoke<string>('stage_pages', { jobId, chunk, pageNumbers, pagesBase64 })
 
-export const runExtraction = (jobId: string, prompt: string, timeoutSecs = 900) =>
-  invoke<{ result: unknown; elapsedMs: number }>('run_extraction', { jobId, prompt, timeoutSecs })
+export const runExtraction = (jobId: string, chunk: number, prompt: string, timeoutSecs = 1800) =>
+  invoke<{ result: unknown; elapsedMs: number }>('run_extraction', {
+    jobId,
+    chunk,
+    prompt,
+    timeoutSecs,
+  })
 
 export interface ExtractionProgress {
   jobId: string
@@ -97,6 +106,9 @@ export const storageStats = () => invoke<StorageStats>('storage_stats')
 /** jobId 를 주면 그 작업만, 없으면 전체. 확보한 바이트 수를 돌려준다. */
 export const clearPageImages = (jobId?: string) =>
   invoke<number>('clear_page_images', { jobId: jobId ?? null })
+
+/** 앱이 만든 claude 대화 기록을 지운다. 앱 폴더 밖(~/.claude/projects)에 쌓인다. */
+export const clearClaudeSessions = () => invoke<number>('clear_claude_sessions')
 
 export const purgeJobsBefore = (before: string) =>
   invoke<{ deleted: number; freedBytes: number }>('purge_jobs_before', { before })

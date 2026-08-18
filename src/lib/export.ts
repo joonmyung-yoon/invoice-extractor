@@ -1,50 +1,41 @@
-import { OUTPUT_COLUMNS, type Row } from './types'
-import { buildFileName } from './normalize'
-
-const CORP = 'SCR'
-const CATEGORY = 'Bill'
+import { BUYER_ENTITY, OUTPUT_COLUMNS, type Row } from './types'
 
 /**
- * 예시 파일과 동일한 16컬럼 순서로 한 행을 펼친다.
+ * 장부에 붙여넣을 한 행을 만든다.
  *
- * Memo 는 원본 장부에 없는 우리 내부 메모라 값을 내보내지 않는다. 다만 컬럼 자리는
- * 비운 채로 남긴다 — 칸을 빼면 붙여넣을 때 뒤쪽 열이 통째로 밀린다.
+ * Memo 는 우리 내부 메모라 장부 형식에 아예 없다 — 내보내지 않는다.
  */
-function cells(row: Row, index: number): (string | number)[] {
+function cells(row: Row): (string | number)[] {
+  const pages = row.sourcePages.length ? row.sourcePages : []
   return [
-    index + 1,
-    CORP,
-    CATEGORY,
+    row.location,          // buyer — 지점 코드
     row.date,
     row.invoiceNumber,
-    row.vendorName,
-    '', // SCR_SUB_VENDOR — 사람이 나중에 채우는 칸
-    '', // Memo — 내부 메모라 내보내지 않는다
+    BUYER_ENTITY,          // vendor — 법인명(고정)
+    row.vendorName,        // sub-vendor — 실제 거래처
     row.coa,
     row.amount,
-    '', // PAID
+    pages.length ? Math.min(...pages) : '',   // pageno — 시작 페이지
+    pages.length || '',                        // pages — 걸친 장수
     row.payment,
-    '', // PAID_DATE
     row.cardId,
-    row.location,
-    buildFileName(row),
   ]
 }
 
 /** Records 탭에 쌓을 문자열 행. 헤더는 OUTPUT_COLUMNS 와 같다. */
 export function toSheetRows(rows: Row[]): string[][] {
-  return rows.map((r, i) => cells(r, i).map(String))
+  return rows.map((r) => cells(r).map(String))
 }
 
 /** 구글시트·엑셀에 그대로 붙여넣을 수 있는 TSV. */
 export function toTsv(rows: Row[], withHeader = true): string {
-  const lines = rows.map((r, i) => cells(r, i).join('\t'))
+  const lines = rows.map((r) => cells(r).join('\t'))
   return (withHeader ? [OUTPUT_COLUMNS.join('\t'), ...lines] : lines).join('\n')
 }
 
 /** 사람이 눈으로 확인하기 좋은 정렬된 텍스트. */
 export function toText(rows: Row[]): string {
-  const table = [OUTPUT_COLUMNS as readonly string[], ...rows.map((r, i) => cells(r, i).map(String))]
+  const table = [OUTPUT_COLUMNS as readonly string[], ...rows.map((r) => cells(r).map(String))]
   const widths = table[0].map((_, c) => Math.max(...table.map((r) => [...String(r[c] ?? '')].length)))
   return table
     .map((r) => r.map((v, c) => String(v ?? '').padEnd(widths[c])).join('  ').trimEnd())
@@ -52,6 +43,9 @@ export function toText(rows: Row[]): string {
 }
 
 // ── xlsx ──────────────────────────────────────────────────────────
+
+const DATE_COL = OUTPUT_COLUMNS.indexOf('date')
+const AMT_COL = OUTPUT_COLUMNS.indexOf('amt')
 
 /** Excel 날짜 일련번호. 1900 윤년 버그 때문에 기준일이 1899-12-30 이다. */
 function excelSerial(mmddyyyy: string): number | null {
@@ -89,16 +83,16 @@ export function toXlsx(rows: Row[]): Uint8Array {
   const body = rows
     .map((row, i) => {
       const r = i + 2
-      const xml = cells(row, i)
+      const xml = cells(row)
         .map((v, c) => {
           const ref = `${colName(c)}${r}`
-          if (c === 3) {
+          if (c === DATE_COL) {
             const serial = excelSerial(String(v))
             return serial === null
               ? `<c r="${ref}" t="inlineStr"><is><t>${esc(String(v))}</t></is></c>`
               : `<c r="${ref}" s="2"><v>${serial}</v></c>` // s=2 → mm/dd/yyyy
           }
-          if (typeof v === 'number') return `<c r="${ref}" s="${c === 9 ? 3 : 0}"><v>${v}</v></c>`
+          if (typeof v === 'number') return `<c r="${ref}" s="${c === AMT_COL ? 3 : 0}"><v>${v}</v></c>`
           return v === '' ? `<c r="${ref}"/>` : `<c r="${ref}" t="inlineStr"><is><t>${esc(String(v))}</t></is></c>`
         })
         .join('')

@@ -111,6 +111,33 @@ fn kill_pid(pid: u32) {
         .status();
 }
 
+/// claude 가 그 작업 폴더의 대화 기록을 남기는 위치.
+///
+/// `~/.claude/projects/<경로를 -로 바꾼 이름>` 에 쌓인다. 우리는 추출 결과만 필요하고
+/// 대화 기록은 볼 일이 없는데, 작업 한 건에 수십 MB 씩 쌓여 디스크를 잡아먹는다.
+fn session_dir(workdir: &Path) -> Option<PathBuf> {
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
+    let encoded: String = workdir
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    Some(PathBuf::from(home).join(".claude/projects").join(encoded))
+}
+
+/// 추출이 끝난 뒤 그 작업의 대화 기록을 지운다. 지운 바이트 수를 돌려준다.
+pub fn cleanup_session(workdir: &Path) -> u64 {
+    let Some(dir) = session_dir(workdir) else { return 0 };
+    if !dir.is_dir() {
+        return 0;
+    }
+    let size = std::fs::read_dir(&dir)
+        .map(|d| d.flatten().filter_map(|f| f.metadata().ok()).map(|m| m.len()).sum())
+        .unwrap_or(0);
+    let _ = std::fs::remove_dir_all(&dir);
+    size
+}
+
 /// 파일 경로에서 pageNN 의 번호를 뽑는다.
 fn page_number(path: &str) -> Option<usize> {
     let name = path.rsplit(['/', '\\']).next()?;

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../lib/api'
-import { buildFileName } from '../lib/normalize'
 import { toXlsx } from '../lib/export'
 import { printRows } from '../lib/printView'
 import { PageViewer } from './PageViewer'
-import type { Invoice, Master, Row } from '../lib/types'
+import { BUYER_ENTITY, type Invoice, type Master, type Row } from '../lib/types'
 
 interface Props {
   rows: Row[]
@@ -37,54 +36,51 @@ type Mode = 'off' | 'split' | 'review' | 'window'
 const CUSTOM = '\u0000custom'
 
 /**
- * 원본 엑셀(samples/invoice_extract_example.xlsx)의 16컬럼을 순서 그대로 보여준다.
+ * 장부에 붙여넣는 컬럼 순서 그대로 보여준다.
  *
- * 값이 항상 고정이거나 비어 있는 칸도 감추지 않는다. 화면에서 보는 것과 붙여넣는 것이
- * 같아야 어디에 무엇이 들어가는지 헷갈리지 않는다.
- *
- * 헤더 표기도 원본을 따른다. 원본은 O열이 'FileName' 인데 지점 코드가 들어가고
- * P열은 헤더가 비어 있는데 파일명이 들어간다 — 어긋나 있지만 그쪽 시트가 그렇게 생겼다.
+ * vendor 는 법인명(모든 행 동일)이고 실제 거래처는 sub-vendor 다.
+ * Memo 는 장부 형식에 없는 우리 내부 메모라 '*' 로 구분하고 내보내지 않는다.
  */
 const COLS: Col[] = [
-  { key: 'no', label: 'No', width: 46, kind: 'readonly', get: (_r, i) => String(i + 1) },
-  { key: 'corp', label: 'CORP', width: 58, kind: 'readonly', get: () => 'SCR' },
-  { key: 'category', label: 'Category', width: 74, kind: 'readonly', get: () => 'Bill' },
-  { key: 'date', label: 'DATE', width: 100, kind: 'text', get: (r) => r.date, set: (r, v) => ({ ...r, date: v }) },
-  { key: 'invoiceNumber', label: 'Invoice_number', width: 136, kind: 'text', get: (r) => r.invoiceNumber, set: (r, v) => ({ ...r, invoiceNumber: v }) },
   {
-    key: 'vendorName', label: 'Vendor_name', width: 200, kind: 'select',
-    get: (r) => r.vendorName, set: (r, v) => ({ ...r, vendorName: v }),
-    options: (m) => m.vendors.map((v) => v.canonicalName),
-  },
-  { key: 'subVendor', label: 'SCR_SUB_VENDOR', width: 130, kind: 'readonly', get: () => '' },
-  // 우리 내부 메모. 붙여넣기·내보내기에는 나가지 않는다.
-  { key: 'memo', label: 'Memo *', width: 160, kind: 'text', get: (r) => r.memo, set: (r, v) => ({ ...r, memo: v }) },
-  {
-    key: 'coa', label: 'COA', width: 190, kind: 'select',
-    get: (r) => r.coa, set: (r, v) => ({ ...r, coa: v }),
-    options: (m) => m.coa,
-  },
-  { key: 'amount', label: 'AMT', width: 100, kind: 'num', get: (r) => r.amount.toFixed(2), set: (r, v) => ({ ...r, amount: toNum(v) }) },
-  { key: 'paid', label: 'PAID', width: 62, kind: 'readonly', get: () => '' },
-  {
-    key: 'payment', label: 'PAYMENT', width: 96, kind: 'select',
-    get: (r) => r.payment, set: (r, v) => ({ ...r, payment: v as Row['payment'] }),
-    options: () => ['CARD', 'CHECK', 'ACH'],
-  },
-  { key: 'paidDate', label: 'PAID_DATE', width: 92, kind: 'readonly', get: () => '' },
-  {
-    key: 'cardId', label: 'CARD_ID', width: 110, kind: 'select',
-    get: (r) => r.cardId, set: (r, v) => ({ ...r, cardId: v }),
-    options: (m) => m.cards.map((c) => c.cardId),
-  },
-  {
-    // 원본 헤더는 'FileName' 이지만 실제로는 지점 코드가 들어가는 칸이다.
-    key: 'location', label: 'FileName', width: 104, kind: 'select',
+    key: 'location', label: 'buyer', width: 90, kind: 'select',
     get: (r) => r.location, set: (r, v) => ({ ...r, location: v.toUpperCase() }),
     options: (m) => m.locations.map((l) => l.code),
   },
-  // 원본에는 헤더가 비어 있다. 실제 파일명이 들어가는 칸.
-  { key: 'fileName', label: '', width: 330, kind: 'readonly', get: (r) => buildFileName(r) },
+  { key: 'date', label: 'date', width: 100, kind: 'text', get: (r) => r.date, set: (r, v) => ({ ...r, date: v }) },
+  { key: 'invoiceNumber', label: 'invoiceno', width: 130, kind: 'text', get: (r) => r.invoiceNumber, set: (r, v) => ({ ...r, invoiceNumber: v }) },
+  { key: 'buyerEntity', label: 'vendor', width: 250, kind: 'readonly', get: () => BUYER_ENTITY },
+  {
+    key: 'vendorName', label: 'sub-vendor', width: 200, kind: 'select',
+    get: (r) => r.vendorName, set: (r, v) => ({ ...r, vendorName: v }),
+    options: (m) => m.vendors.map((v) => v.canonicalName),
+  },
+  {
+    key: 'coa', label: 'cogs', width: 190, kind: 'select',
+    get: (r) => r.coa, set: (r, v) => ({ ...r, coa: v }),
+    options: (m) => m.coa,
+  },
+  { key: 'amount', label: 'amt', width: 100, kind: 'num', get: (r) => r.amount.toFixed(2), set: (r, v) => ({ ...r, amount: toNum(v) }) },
+  {
+    key: 'pageno', label: 'pageno', width: 74, kind: 'readonly',
+    get: (r) => (r.sourcePages.length ? String(Math.min(...r.sourcePages)) : ''),
+  },
+  {
+    key: 'pages', label: 'pages', width: 64, kind: 'readonly',
+    get: (r) => (r.sourcePages.length ? String(r.sourcePages.length) : ''),
+  },
+  {
+    key: 'payment', label: 'payment', width: 96, kind: 'select',
+    get: (r) => r.payment, set: (r, v) => ({ ...r, payment: v as Row['payment'] }),
+    options: () => ['CARD', 'CHECK', 'ACH'],
+  },
+  {
+    key: 'cardId', label: 'card id', width: 110, kind: 'select',
+    get: (r) => r.cardId, set: (r, v) => ({ ...r, cardId: v }),
+    options: (m) => m.cards.map((c) => c.cardId),
+  },
+  // 장부에는 없는 우리 메모. 붙여넣기·내보내기에 나가지 않는다.
+  { key: 'memo', label: 'Memo *', width: 170, kind: 'text', get: (r) => r.memo, set: (r, v) => ({ ...r, memo: v }) },
 ]
 
 const toNum = (v: string) => {
@@ -111,6 +107,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   const dragBar = useRef(false)
   // '직접 입력…' 으로 전환한 칸들 (행id:컬럼키)
   const [freeform, setFreeform] = useState<Set<string>>(new Set())
+  // 지금 보고 있는 칸. 원본에서 그 자리를 강조하는 데 쓴다.
+  const [activeField, setActiveField] = useState<string | null>(null)
 
   const view = useMemo(() => {
     let out = rows
@@ -209,12 +207,22 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   const focusRow = view.find((r) => r.id === focusId) ?? view[0] ?? null
   const focusIndex = Math.max(0, view.findIndex((r) => r.id === focusRow?.id))
 
+  // 모델이 알려 준 자리를 화면 이름표와 함께 넘긴다.
+  const highlights = Object.entries(focusRow?.boxes ?? {}).map(([field, b]) => ({
+    field,
+    label: COLS.find((c) => c.key === field)?.label.replace(' *', '') ?? field,
+    page: b.page,
+    box: b.box,
+  }))
+
   const viewerTarget = {
     jobId: jobId ?? null,
     pages: focusRow?.sourcePages ?? [],
     caption: focusRow
       ? `${focusRow.vendorName || '(벤더 없음)'} · ${focusRow.invoiceNumber || '(번호 없음)'} · ${focusRow.amount.toFixed(2)}`
       : undefined,
+    highlights,
+    activeField,
   }
 
   useEffect(() => {
@@ -357,11 +365,18 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
             {COLS.filter((c) => c.kind !== 'readonly' || c.key === 'fileName').map((c) => {
               const need = focusRow.needsReview.includes(c.key)
               const fromTable = focusRow.sources?.[c.key] === 'table'
+              const hasBox = !!focusRow.boxes?.[c.key]
               return (
-                <div className="rfield" key={c.key}>
+                <div
+                  className={`rfield ${activeField === c.key ? 'active' : ''}`}
+                  key={c.key}
+                  onFocusCapture={() => setActiveField(c.key)}
+                  onMouseEnter={() => hasBox && setActiveField(c.key)}
+                >
                   <label className={need ? 'need' : ''}>
                     {c.label || 'FileName'}
                     {c.key === 'location' && <span className="muted"> (지점)</span>}
+                    {hasBox && <span className="pin" title="원본에서 이 값을 읽어온 자리">◎</span>}
                   </label>
                   {c.kind === 'readonly' ? (
                     <div className="rval mono small">{c.get(focusRow, focusIndex)}</div>
@@ -446,7 +461,10 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                 className={[picked.has(r.id) ? 'picked' : '', focusId === r.id ? 'focused' : '']
                   .filter(Boolean)
                   .join(' ')}
-                onClick={() => setFocusId(r.id)}
+                onClick={() => {
+                  setFocusId(r.id)
+                  setActiveField(null)
+                }}
               >
                 <td className="pick">
                   <input

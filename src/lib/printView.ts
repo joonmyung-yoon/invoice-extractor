@@ -1,4 +1,4 @@
-import { OUTPUT_COLUMNS, COLUMN_LABELS, type Row } from './types'
+import { OUTPUT_COLUMNS, type Row } from './types'
 import { toSheetRows } from './export'
 
 /**
@@ -10,7 +10,7 @@ import { toSheetRows } from './export'
  * 'Microsoft Print to PDF' 로 저장하면 된다.
  */
 export function printRows(rows: Row[], title: string) {
-  const labels = OUTPUT_COLUMNS.map((c) => COLUMN_LABELS[c] ?? c)
+  const labels = [...OUTPUT_COLUMNS]
   const data = toSheetRows(rows)
   const total = rows.reduce((a, r) => a + r.amount, 0)
 
@@ -21,8 +21,7 @@ export function printRows(rows: Row[], title: string) {
       .replace(/>/g, '&gt;')
 
   // 금액은 오른쪽 정렬해야 읽힌다. FileName 은 길어서 줄바꿈을 허용한다.
-  const iAmt = OUTPUT_COLUMNS.indexOf('AMT')
-  const iFile = OUTPUT_COLUMNS.length - 1
+  const iAmt = OUTPUT_COLUMNS.indexOf('amt')
 
   const head = labels.map((l) => `<th>${esc(l)}</th>`).join('')
   const body = data
@@ -31,7 +30,7 @@ export function printRows(rows: Row[], title: string) {
         '<tr>' +
         r
           .map((v, i) => {
-            const cls = i === iAmt ? ' class="num"' : i === iFile ? ' class="wrap"' : ''
+            const cls = i === iAmt ? ' class="num"' : ''
             return `<td${cls}>${esc(v)}</td>`
           })
           .join('') +

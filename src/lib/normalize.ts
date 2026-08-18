@@ -1,4 +1,4 @@
-import type { Invoice, Master, Payment, Row } from './types'
+import type { FieldBox, Invoice, Master, Payment, Row } from './types'
 
 /** 표기 흔들림(대소문자·구두점·공백)을 없앤 비교용 키. */
 const key = (s: string) => s.toLowerCase().replace(/[.,'"()\-\s]+/g, '')
@@ -117,6 +117,7 @@ export function normalize(raw: any, master: Master): NormalizeResult {
           coa: coa ? (coa === claimedCoa && src('coa') === 'document' ? 'document' : 'table') : 'none',
           location: location ? 'document' : 'none',
         },
+        boxes: parseBoxes(r.boxes),
         editedFields: [],
       })
       rowIds.push(id)
@@ -156,6 +157,30 @@ export function normalize(raw: any, master: Master): NormalizeResult {
       suggestedCoa: String(u.suggested_coa ?? ''),
     })),
   }
+}
+
+/**
+ * 모델이 준 위치 정보를 걸러 낸다.
+ *
+ * 화면 밖이거나 뒤집힌 사각형은 잘못 짚은 것이므로 버린다. 엉뚱한 곳을 가리키면
+ * 검토가 오히려 느려진다.
+ */
+function parseBoxes(raw: any): Record<string, FieldBox> {
+  const out: Record<string, FieldBox> = {}
+  if (!raw || typeof raw !== 'object') return out
+
+  for (const [field, v] of Object.entries<any>(raw)) {
+    const page = Number(v?.page)
+    const b = v?.box
+    if (!Number.isFinite(page) || page < 1 || !Array.isArray(b) || b.length !== 4) continue
+
+    const [x0, y0, x1, y1] = b.map(Number)
+    if (![x0, y0, x1, y1].every((n) => Number.isFinite(n) && n >= 0 && n <= 1000)) continue
+    if (x1 <= x0 || y1 <= y0) continue
+
+    out[field] = { page, box: [x0, y0, x1, y1] }
+  }
+  return out
 }
 
 /** 예시 파일과 같은 FileName 문자열을 만든다: YYYY.MM.DD-지점-법인-벤더-벤더-인보이스-금액 */

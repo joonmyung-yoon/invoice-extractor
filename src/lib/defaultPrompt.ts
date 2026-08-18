@@ -130,6 +130,12 @@ Write \`extracted.json\` in the current directory:
             "card_id": "none",
             "location": "none"
           },
+          "boxes": {
+            "invoice_number": { "page": 4, "box": [812, 96, 918, 121] },
+            "date": { "page": 4, "box": [700, 96, 800, 121] },
+            "amount": { "page": 5, "box": [845, 930, 940, 955] },
+            "vendor_name": { "page": 4, "box": [60, 40, 300, 90] }
+          },
           "needs_review": ["location"]
         }
       ]
@@ -139,6 +145,18 @@ Write \`extracted.json\` in the current directory:
     { "name": "as printed on the document", "pages": [17], "suggested_coa": "COGS:Supplies" }
   ]
 }
+
+- \`boxes\`: **where on the page you read each value from**, so a human can check your work
+  at a glance instead of hunting through the scan. For every field you read off the document,
+  give the page number and a rectangle \`[x0, y0, x1, y1]\` in **thousandths of the page**
+  (0–1000 on each axis, origin at the top-left corner of that page image).
+
+  Draw the rectangle tightly around **the value itself**, not the whole row or the label.
+  For a handwritten split line, box the part that belongs to this row.
+  Include boxes for whichever of these you actually read: \`date\`, \`invoice_number\`,
+  \`vendor_name\`, \`amount\`, \`location\`, \`card_id\`, \`payment\`.
+  Omit a field entirely rather than guessing a rectangle — a wrong box sends the reviewer to
+  the wrong place, which is worse than no box.
 
 - \`split_check\`: "ok" when split amounts sum to the printed total, "n/a" when there is no
   split, or "mismatch: sum 1216.00 != total 1216.47".

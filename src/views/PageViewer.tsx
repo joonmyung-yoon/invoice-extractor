@@ -2,10 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import * as api from '../lib/api'
 import { renderPage } from '../lib/pdfCache'
 
+export interface Highlight {
+  field: string
+  label: string
+  page: number
+  /** [x0, y0, x1, y1], 페이지 크기 대비 0~1000 */
+  box: [number, number, number, number]
+}
+
 export interface ViewerTarget {
   jobId: string | null
   pages: number[]
   caption?: string
+  /** 값을 읽어온 자리들. 테두리로만 표시한다. */
+  highlights?: Highlight[]
+  /** 지금 보고 있는 필드. 그 자리만 진하게 표시한다. */
+  activeField?: string | null
 }
 
 interface Props extends ViewerTarget {
@@ -28,6 +40,8 @@ export function PageViewer({
   pages,
   caption,
   fallback,
+  highlights,
+  activeField,
   onClose,
   onPopOut,
   standalone,
@@ -36,12 +50,25 @@ export function PageViewer({
   const [zoom, setZoom] = useState(1)
   const [src, setSrc] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // 영역 표시가 글자를 가리면 오히려 방해가 되므로 끌 수 있게 한다.
+  const [showBoxes, setShowBoxes] = useState(
+    () => localStorage.getItem('showBoxes') !== 'off',
+  )
   const boxRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; y: number; l: number; t: number } | null>(null)
 
   const page = pages[Math.min(idx, Math.max(0, pages.length - 1))]
 
   useEffect(() => setIdx(0), [pages.join(',')])
+
+  // 고른 칸이 다른 페이지에서 나온 값이면 그 페이지를 보여준다.
+  useEffect(() => {
+    if (!activeField || !highlights) return
+    const h = highlights.find((x) => x.field === activeField)
+    if (!h) return
+    const at = pages.indexOf(h.page)
+    if (at >= 0) setIdx(at)
+  }, [activeField, highlights, pages.join(',')])
 
   useEffect(() => {
     if (boxRef.current) {
@@ -109,6 +136,19 @@ export function PageViewer({
         </button>
         <button onClick={() => setZoom((z) => Math.min(5, z + 0.25))} title="확대">+</button>
 
+        {highlights && highlights.length > 0 && (
+          <button
+            className={showBoxes ? 'on' : ''}
+            onClick={() => {
+              const next = !showBoxes
+              setShowBoxes(next)
+              localStorage.setItem('showBoxes', next ? 'on' : 'off')
+            }}
+            title="값을 읽어온 자리를 원본에 테두리로 표시합니다"
+          >
+            영역
+          </button>
+        )}
         {onPopOut && (
           <button onClick={onPopOut} title="새 창으로 열기 (다른 화면에 놓고 볼 수 있습니다)">
             ⧉
@@ -142,7 +182,27 @@ export function PageViewer({
         style={{ cursor: zoom > 1 ? 'grab' : 'default' }}
       >
         {src ? (
-          <img src={src} alt={`page ${page}`} style={{ width: `${zoom * 100}%` }} />
+          <div className="vstage" style={{ width: `${zoom * 100}%` }}>
+            <img src={src} alt={`page ${page}`} />
+            {showBoxes &&
+              highlights
+                ?.filter((h) => h.page === page)
+                .map((h) => (
+                  <span
+                    key={h.field}
+                    className={`hl ${activeField === h.field ? 'on' : ''}`}
+                    style={{
+                      left: `${h.box[0] / 10}%`,
+                      top: `${h.box[1] / 10}%`,
+                      width: `${(h.box[2] - h.box[0]) / 10}%`,
+                      height: `${(h.box[3] - h.box[1]) / 10}%`,
+                    }}
+                    title={h.label}
+                  >
+                    <i>{h.label}</i>
+                  </span>
+                ))}
+          </div>
         ) : loading ? (
           <div className="muted small pad">불러오는 중…</div>
         ) : (

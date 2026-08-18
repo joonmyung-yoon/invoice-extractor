@@ -66,24 +66,36 @@ fn claude_status(state: State<AppState>) -> Result<String, String> {
 }
 
 /// 프런트(pdf.js)가 렌더링한 페이지 PNG 들을 작업 폴더에 저장한다.
+/// 한 조각의 페이지 이미지를 저장한다.
+///
+/// PDF 를 통째로 한 번에 돌리면 페이지 수에 비례해 시간이 늘어난다(장당 10~15초).
+/// 조각으로 나눠 동시에 돌리면 그만큼 빨라지므로, 조각마다 별도 폴더를 쓴다.
+/// 파일명에는 원본 페이지 번호를 그대로 넣어 나중에 합칠 때 헷갈리지 않게 한다.
 #[tauri::command]
 fn stage_pages(
     state: State<AppState>,
     job_id: String,
+    chunk: usize,
+    page_numbers: Vec<usize>,
     pages_base64: Vec<String>,
 ) -> Result<String, String> {
-    let workdir = state.data_dir.join("jobs").join(&job_id);
+    let workdir = chunk_dir(&state.data_dir, &job_id, chunk);
     std::fs::create_dir_all(&workdir).map_err(|x| x.to_string())?;
 
     let engine = base64::engine::general_purpose::STANDARD;
     for (i, b64) in pages_base64.iter().enumerate() {
+        let n = page_numbers.get(i).copied().unwrap_or(i + 1);
         // data URL 로 넘어오는 경우를 대비해 앞부분을 떼어낸다.
         let raw = b64.split(",").last().unwrap_or(b64);
-        let bytes = engine.decode(raw).map_err(|x| format!("페이지 {} 디코딩 실패: {x}", i + 1))?;
-        std::fs::write(workdir.join(format!("page{:02}.png", i + 1)), bytes)
+        let bytes = engine.decode(raw).map_err(|x| format!("페이지 {n} 디코딩 실패: {x}"))?;
+        std::fs::write(workdir.join(format!("page{n:02}.png")), bytes)
             .map_err(|x| x.to_string())?;
     }
     Ok(workdir.to_string_lossy().to_string())
+}
+
+fn chunk_dir(data_dir: &std::path::Path, job_id: &str, chunk: usize) -> PathBuf {
+    data_dir.join("jobs").join(job_id).join(format!("c{chunk}"))
 }
 
 #[tauri::command]
@@ -91,18 +103,19 @@ async fn run_extraction(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     job_id: String,
+    chunk: usize,
     prompt: String,
     timeout_secs: u64,
 ) -> Result<serde_json::Value, String> {
     let (configured, workdir) = {
         let conn = state.db.0.lock().unwrap();
         let c = db::get_setting(&conn, "claude_path").map_err(e)?;
-        (c, state.data_dir.join("jobs").join(&job_id))
+        (c, chunk_dir(&state.data_dir, &job_id, chunk))
     };
 
     let cli = claude::resolve_cli(configured.as_deref()).map_err(e)?;
     let running = state.running_handle();
-    let id = job_id.clone();
+    let id = format!("{job_id}#{chunk}");
 
     // claude 실행은 블로킹이라 별도 스레드로 뺀다.
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -123,12 +136,14 @@ async fn run_extraction(
     .map_err(|x| x.to_string())?
     .map_err(e)?;
 
+    // 추출이 끝나면 claude 대화 기록은 쓸모가 없다. 한 건에 수십 MB 라 바로 지운다.
+    let freed = claude::cleanup_session(&chunk_dir(&state.data_dir, &job_id, chunk));
+    if freed > 0 {
+        eprintln!("claude 세션 기록 {}MB 정리", freed / 1_048_576);
+    }
+
     let parsed: serde_json::Value = serde_json::from_str(&outcome.extracted_json)
         .map_err(|x| format!("추출 결과 JSON 을 해석하지 못했습니다: {x}"))?;
-
-    let conn = state.db.0.lock().unwrap();
-    db::save_job_payload(&conn, &job_id, &outcome.extracted_json, outcome.elapsed_ms as i64)
-        .map_err(e)?;
 
     Ok(serde_json::json!({ "result": parsed, "elapsedMs": outcome.elapsed_ms }))
 }
@@ -310,17 +325,24 @@ fn read_pdf(state: State<AppState>, job_id: String) -> Result<Option<Vec<u8>>, S
 /// 그 미리보기가 없다. 원본과 대조하려면 디스크에 있는 이미지를 다시 읽어야 한다.
 #[tauri::command]
 fn page_image(state: State<AppState>, job_id: String, page: usize) -> Result<Option<String>, String> {
-    let path = state
-        .data_dir
-        .join("jobs")
-        .join(&job_id)
-        .join(format!("page{page:02}.png"));
-
-    if !path.is_file() {
-        return Ok(None); // 이미지를 비웠을 수 있다. 오류가 아니다.
+    // 조각 나눠 처리하므로 페이지는 c0, c1 … 아래에 흩어져 있다.
+    let root = state.data_dir.join("jobs").join(&job_id);
+    let name = format!("page{page:02}.png");
+    let mut found = root.join(&name);
+    if !found.is_file() {
+        found = match std::fs::read_dir(&root)
+            .ok()
+            .and_then(|d| {
+                d.flatten()
+                    .map(|e| e.path().join(&name))
+                    .find(|p| p.is_file())
+            }) {
+            Some(p) => p,
+            None => return Ok(None), // 이미지를 비웠을 수 있다. 오류가 아니다.
+        };
     }
 
-    let bytes = std::fs::read(&path).map_err(|x| x.to_string())?;
+    let bytes = std::fs::read(&found).map_err(|x| x.to_string())?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     Ok(Some(format!("data:image/png;base64,{b64}")))
 }
@@ -328,12 +350,7 @@ fn page_image(state: State<AppState>, job_id: String, page: usize) -> Result<Opt
 /// 그 작업의 페이지 이미지가 아직 남아 있는지.
 #[tauri::command]
 fn has_page_images(state: State<AppState>, job_id: String) -> bool {
-    std::fs::read_dir(state.data_dir.join("jobs").join(&job_id))
-        .map(|d| {
-            d.flatten()
-                .any(|f| f.path().extension().and_then(|x| x.to_str()) == Some("png"))
-        })
-        .unwrap_or(false)
+    dir_size(&state.data_dir.join("jobs").join(&job_id)) > 0
 }
 
 // ── 저장 용량 ──────────────────────────────────────────────────────
@@ -379,15 +396,56 @@ fn storage_stats(state: State<AppState>) -> Result<serde_json::Value, String> {
         .sum();
 
     let images_bytes: u64 = per_job.iter().map(|j| j["bytes"].as_u64().unwrap_or(0)).sum();
+    let session_bytes = claude_sessions_size();
 
     Ok(serde_json::json!({
         "dataDir": state.data_dir.to_string_lossy(),
         "dbBytes": db_bytes,
         "imagesBytes": images_bytes,
-        "totalBytes": db_bytes + images_bytes,
+        // claude 가 앱 폴더 밖(~/.claude/projects)에 남기는 대화 기록.
+        // 여기 포함하지 않으면 실제로 쓰는 용량이 훨씬 큰데도 모르고 지나간다.
+        "sessionBytes": session_bytes,
+        "totalBytes": db_bytes + images_bytes + session_bytes,
         "jobDirs": per_job.len(),
         "perJob": per_job,
     }))
+}
+
+/// 이 앱이 만든 claude 대화 기록 폴더들을 찾는다.
+fn claude_session_dirs() -> Vec<PathBuf> {
+    let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) else {
+        return Vec::new();
+    };
+    let root = PathBuf::from(home).join(".claude/projects");
+    std::fs::read_dir(&root)
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_dir()
+                        && p.file_name()
+                            .and_then(|x| x.to_str())
+                            .map(|n| n.contains("com-scr-invoice-extractor-jobs-"))
+                            .unwrap_or(false)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn claude_sessions_size() -> u64 {
+    claude_session_dirs().iter().map(|p| dir_size(p)).sum()
+}
+
+/// 남아 있는 claude 대화 기록을 모두 지운다. 확보한 바이트 수를 돌려준다.
+#[tauri::command]
+fn clear_claude_sessions() -> u64 {
+    let mut freed = 0;
+    for d in claude_session_dirs() {
+        freed += dir_size(&d);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    freed
 }
 
 /// 페이지 이미지를 지운다. 추출된 표와 이력은 DB 에 있으므로 그대로 남는다.
@@ -412,18 +470,30 @@ fn clear_images_in(jobs_dir: &std::path::Path, job_id: Option<&str>) -> u64 {
         if !dir.is_dir() {
             continue;
         }
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for f in entries.flatten() {
-            // 원본 PDF 도 같이 지운다. 둘 다 원본 대조용이라 남겨 둘 이유가 없다.
-            let ext = f.path().extension().and_then(|x| x.to_str()).map(str::to_string);
-            if matches!(ext.as_deref(), Some("png") | Some("pdf")) {
-                freed += f.metadata().map(|m| m.len()).unwrap_or(0);
-                let _ = std::fs::remove_file(f.path());
-            }
-        }
-        // 이미지가 다 빠지고 남은 게 없으면 폴더도 정리한다.
+        // 조각 폴더(c0, c1 …) 안에 이미지가 들어 있으므로 하위까지 훑는다.
+        freed += purge_originals(&dir);
         if std::fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
             let _ = std::fs::remove_dir(&dir);
+        }
+    }
+    freed
+}
+
+/// 원본 대조용 파일(페이지 이미지·PDF)만 지운다. 추출 결과는 DB 에 있어 영향 없다.
+fn purge_originals(dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let mut freed = 0u64;
+    for f in entries.flatten() {
+        let p = f.path();
+        if p.is_dir() {
+            freed += purge_originals(&p);
+            let _ = std::fs::remove_dir(&p);
+            continue;
+        }
+        let ext = p.extension().and_then(|x| x.to_str()).map(str::to_string);
+        if matches!(ext.as_deref(), Some("png") | Some("pdf")) {
+            freed += f.metadata().map(|m| m.len()).unwrap_or(0);
+            let _ = std::fs::remove_file(&p);
         }
     }
     freed
@@ -775,6 +845,7 @@ pub fn run() {
             has_page_images,
             storage_stats,
             clear_page_images,
+            clear_claude_sessions,
             purge_jobs_before,
             save_service_account_key,
             service_account_email,

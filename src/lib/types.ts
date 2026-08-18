@@ -1,35 +1,33 @@
 // 시트 출력 컬럼(예시 파일과 동일한 순서). 빈 칸으로 두는 컬럼도 형식을 맞추기 위해 유지한다.
-// 샘플 파일(samples/invoice_extract_example.xlsx)의 헤더를 글자 그대로 옮긴 것.
+// 실제 장부에 붙여넣는 컬럼. 처음 받은 예시 파일은 다른 시트였고, 아래가 맞는 형식이다.
 //
-// 주의: 원본 헤더가 실제 내용과 어긋나 있다. O열은 'FileName' 이라고 적혀 있지만
-// 지점 코드(STN/ODG/…)가 들어가고, P열은 헤더가 비어 있는데 진짜 파일명이 들어간다.
-// 기존 시트에 그대로 붙여넣어야 하므로 이 표기를 고치지 않고 유지한다.
+// 주의할 점 두 가지:
+//  - vendor 는 법인명(고정)이고, 실제 거래처는 sub-vendor 다. 둘이 뒤바뀌기 쉽다.
+//  - pageno/pages 는 그 인보이스가 PDF 몇 번째 장에서 몇 장에 걸쳐 있는지다.
 export const OUTPUT_COLUMNS = [
-  'No',
-  'CORP',
-  'Category',
-  'DATE',
-  'Invoice_number',
-  'Vendor_name',
-  'SCR_SUB_VENDOR',
-  'Memo',
-  'COA',
-  'AMT',
-  'PAID',
-  'PAYMENT',
-  'PAID_DATE',
-  'CARD_ID',
-  'FileName', // ← 실제로는 지점 코드가 들어간다
-  '',         // ← 실제로는 파일명이 들어간다
+  'buyer',
+  'date',
+  'invoiceno',
+  'vendor',
+  'sub-vendor',
+  'cogs',
+  'amt',
+  'pageno',
+  'pages',
+  'payment',
+  'card id',
 ] as const
 
-/** 화면과 안내문에서 쓰는 사람이 읽을 수 있는 컬럼 이름. */
-export const COLUMN_LABELS: Record<string, string> = {
-  FileName: 'LOCATION',
-  '': 'FileName',
-}
+/** 모든 행에 같은 값이 들어가는 법인명. */
+export const BUYER_ENTITY = 'Southern California Restaurant Company'
 
 export type Payment = 'CARD' | 'CHECK' | 'ACH'
+
+/** 원본 페이지에서 값을 읽어온 자리. box 는 [x0, y0, x1, y1], 0~1000 기준. */
+export interface FieldBox {
+  page: number
+  box: [number, number, number, number]
+}
 
 /** 추출 결과 한 행. 시트 한 줄에 대응한다. */
 export interface Row {
@@ -50,6 +48,8 @@ export interface Row {
   needsReview: string[]
   /** 각 값의 출처. 'table' 은 인보이스에 없어서 매핑으로 채웠다는 뜻이다. */
   sources: Record<string, 'document' | 'table' | 'none'>
+  /** 원본에서 그 값을 읽어온 위치. 페이지 크기 대비 1/1000 단위 사각형. */
+  boxes: Record<string, FieldBox>
   /** 사용자가 직접 고친 필드명. 재추출해도 덮어쓰지 않는다. */
   editedFields: string[]
 }

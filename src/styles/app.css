@@ -454,3 +454,66 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
 /* 드롭다운이 가장 긴 항목 길이만큼 칸을 밀어내지 않게 한다 */
 .sheet td select, .sheet td input { min-width: 0; max-width: 100%; }
 .sheet td select { text-overflow: ellipsis; }
+
+/* ── 여러 건 처리 ── */
+
+.drop.compact { padding: 18px; }
+
+.jobcard { padding: 10px 12px; margin-bottom: 8px; transition: border-color 0.15s; }
+.jobcard.sel { border-color: var(--accent); }
+.jobcard.done { opacity: 0.92; }
+.jobcard.queued { opacity: 0.7; }
+.jobcard.error { border-color: rgba(239, 68, 68, 0.4); }
+
+/* 탭에 대기 건수 */
+.qbadge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* ── 값을 읽어온 자리 표시 ── */
+
+.viewer .vstage { position: relative; display: block; }
+.viewer .vstage img { display: block; width: 100%; }
+
+/* 글자를 가리지 않도록 테두리만 친다 */
+.hl {
+  position: absolute;
+  border: 1.5px solid rgba(59, 130, 246, 0.75);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+.hl i {
+  position: absolute;
+  left: 0;
+  top: -15px;
+  font-style: normal;
+  font-size: 9px;
+  line-height: 13px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.85);
+  color: #fff;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+/* 지금 고른 칸만 진하게 */
+.hl.on {
+  border-color: #f59e0b;
+  border-width: 2px;
+  background: rgba(245, 158, 11, 0.12);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+.hl.on i { background: #f59e0b; opacity: 1; }
+
+.viewer .vhead button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.reviewmode .rfield.active label { color: var(--warn); }
+.reviewmode .rfield .pin { margin-left: 4px; color: var(--accent); font-size: 10px; }

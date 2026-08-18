@@ -76,7 +76,11 @@ function MainApp() {
         </h1>
         {nav.map(([k, label]) => {
           // 추출은 탭을 옮겨도 계속 돌아간다. 어디에 있든 진행 중임이 보여야 한다.
-          const busy = k === 'extract' && (ext.stage === 'rendering' || ext.stage === 'extracting')
+          const running = ext.jobs.filter(
+            (j) => j.stage === 'rendering' || j.stage === 'extracting',
+          ).length
+          const waiting = ext.jobs.filter((j) => j.stage === 'queued').length
+          const busy = k === 'extract' && running > 0
           return (
             <button
               key={k}
@@ -85,12 +89,12 @@ function MainApp() {
             >
               {label}
               {busy && (
-                <span className="spin" title={
-                  ext.stage === 'rendering'
-                    ? `페이지 변환 ${ext.progress.done}/${ext.progress.total}`
-                    : '추출 중'
-                } />
+                <span
+                  className="spin"
+                  title={`${running}건 처리 중${waiting ? ` · ${waiting}건 대기` : ''}`}
+                />
               )}
+              {busy && waiting > 0 && <span className="qbadge">{waiting}</span>}
             </button>
           )
         })}
