@@ -268,9 +268,14 @@ td.edited { box-shadow: inset 2px 0 0 var(--accent); }
 }
 .sheet td { position: relative; }
 
+/* 범례 색상칩. 다른 규칙이 크기를 바꾸지 못하게 못 박는다
+   (검토 모드의 .review 와 이름이 겹쳐 세로로 늘어난 적이 있다). */
 .legend {
-  display: inline-block;
-  width: 9px; height: 9px;
+  display: inline-block !important;
+  width: 9px !important;
+  height: 9px !important;
+  min-height: 0 !important;
+  flex: none !important;
   border-radius: 2px;
   margin: 0 4px 0 10px;
   vertical-align: -1px;
