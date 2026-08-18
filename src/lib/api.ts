@@ -48,6 +48,12 @@ export const pageImage = (jobId: string, page: number) =>
   invoke<string | null>('page_image', { jobId, page })
 
 export const hasPageImages = (jobId: string) => invoke<boolean>('has_page_images', { jobId })
+
+/** 원본 대조용으로 보관해 둔 PDF. 없으면 null. */
+export const readPdf = (jobId: string) => invoke<number[] | null>('read_pdf', { jobId })
+
+export const storePdf = (jobId: string, bytes: Uint8Array) =>
+  invoke<void>('store_pdf', { jobId, bytes: Array.from(bytes) })
 export const deleteJob = (jobId: string) => invoke<void>('delete_job', { jobId })
 
 // ── prompts ───────────────────────────────────────────────────────
@@ -187,3 +193,46 @@ export function parseMaster(raw: Record<string, any>): Master {
 
 export const syncMaster = async () => parseMaster(await syncMasterRaw())
 export const cachedMaster = async () => parseMaster(await cachedMasterRaw())
+
+// ── 원본 대조 창 ───────────────────────────────────────────────────
+
+import { emit } from '@tauri-apps/api/event'
+import { getAllWebviewWindows, WebviewWindow } from '@tauri-apps/api/webviewWindow'
+
+const VIEWER_LABEL = 'viewer'
+
+/** 원본 대조 창을 띄운다. 이미 있으면 앞으로 가져온다. */
+export async function openViewerWindow(): Promise<void> {
+  const found = (await getAllWebviewWindows()).find((w) => w.label === VIEWER_LABEL)
+  if (found) {
+    await found.show()
+    await found.setFocus()
+    return
+  }
+  const w = new WebviewWindow(VIEWER_LABEL, {
+    url: 'index.html#viewer',
+    title: '원본 보기',
+    width: 900,
+    height: 1100,
+  })
+  await new Promise<void>((resolve) => {
+    void w.once('tauri://created', () => resolve())
+    void w.once('tauri://error', () => resolve())
+  })
+}
+
+export async function closeViewerWindow(): Promise<void> {
+  const found = (await getAllWebviewWindows()).find((w) => w.label === VIEWER_LABEL)
+  await found?.close()
+}
+
+export async function isViewerWindowOpen(): Promise<boolean> {
+  return (await getAllWebviewWindows()).some((w) => w.label === VIEWER_LABEL)
+}
+
+/** 대조 창에 무엇을 보여줄지 알려 준다. */
+export const sendViewerTarget = (t: {
+  jobId: string | null
+  pages: number[]
+  caption?: string
+}) => emit('viewer-target', t)

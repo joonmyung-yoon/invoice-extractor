@@ -281,6 +281,29 @@ async fn save_file_as(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// 원본 PDF 를 작업 폴더에 보관한다.
+///
+/// 추출용 이미지는 긴 변 1568px 로 줄여 만든다(claude 가 그 크기로 보기 때문에 더 크게
+/// 만들어도 인식률은 그대로다). 하지만 사람이 원본과 대조할 때는 그 해상도로는 글씨가
+/// 뭉개진다. PDF 를 그대로 두고 볼 때마다 필요한 배율로 다시 그리는 편이 훨씬 선명하고,
+/// 페이지 PNG 를 여러 장 두는 것보다 용량도 적다.
+#[tauri::command]
+fn store_pdf(state: State<AppState>, job_id: String, bytes: Vec<u8>) -> Result<(), String> {
+    let dir = state.data_dir.join("jobs").join(&job_id);
+    std::fs::create_dir_all(&dir).map_err(|x| x.to_string())?;
+    std::fs::write(dir.join("source.pdf"), bytes).map_err(|x| x.to_string())
+}
+
+/// 보관해 둔 원본 PDF 를 돌려준다. 없으면 None.
+#[tauri::command]
+fn read_pdf(state: State<AppState>, job_id: String) -> Result<Option<Vec<u8>>, String> {
+    let path = state.data_dir.join("jobs").join(&job_id).join("source.pdf");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    std::fs::read(&path).map(Some).map_err(|x| x.to_string())
+}
+
 /// 작업의 페이지 이미지를 돌려준다 (data URL).
 ///
 /// 추출 직후에는 화면이 들고 있는 미리보기를 쓰면 되지만, 이력에서 과거 기록을 열면
@@ -391,7 +414,9 @@ fn clear_images_in(jobs_dir: &std::path::Path, job_id: Option<&str>) -> u64 {
         }
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for f in entries.flatten() {
-            if f.path().extension().and_then(|x| x.to_str()) == Some("png") {
+            // 원본 PDF 도 같이 지운다. 둘 다 원본 대조용이라 남겨 둘 이유가 없다.
+            let ext = f.path().extension().and_then(|x| x.to_str()).map(str::to_string);
+            if matches!(ext.as_deref(), Some("png") | Some("pdf")) {
                 freed += f.metadata().map(|m| m.len()).unwrap_or(0);
                 let _ = std::fs::remove_file(f.path());
             }
@@ -744,6 +769,8 @@ pub fn run() {
             set_setting,
             data_dir,
             save_file_as,
+            store_pdf,
+            read_pdf,
             page_image,
             has_page_images,
             storage_stats,

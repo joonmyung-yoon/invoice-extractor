@@ -7,12 +7,20 @@ import { ExtractView } from './views/ExtractView'
 import { HistoryView } from './views/HistoryView'
 import { PromptsView } from './views/PromptsView'
 import { SettingsView } from './views/SettingsView'
+import { ViewerWindow } from './views/ViewerWindow'
 
 type Tab = 'extract' | 'prompts' | 'history' | 'settings'
 
 const BUILTIN_ID = 'builtin-default'
 
 export default function App() {
+  // 원본 대조 창은 같은 번들을 쓰되 화면만 다르게 그린다.
+  if (window.location.hash.startsWith('#viewer')) return <ViewerWindow />
+
+  return <MainApp />
+}
+
+function MainApp() {
   const [tab, setTab] = useState<Tab>('extract')
   const [master, setMaster] = useState<Master>(EMPTY_MASTER)
   const [prompts, setPrompts] = useState<Prompt[]>([])

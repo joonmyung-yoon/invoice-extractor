@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../lib/api'
 import { buildFileName } from '../lib/normalize'
 import { toXlsx } from '../lib/export'
@@ -42,6 +42,8 @@ const COLS: Col[] = [
     get: (r) => r.vendorName, set: (r, v) => ({ ...r, vendorName: v }),
     options: (m) => m.vendors.map((v) => v.canonicalName),
   },
+  // 원본 장부에는 없는 우리 내부 메모. 위치는 엑셀의 Memo 자리에 맞춘다.
+  { key: 'memo', label: 'Memo *', width: 150, kind: 'text', get: (r) => r.memo, set: (r, v) => ({ ...r, memo: v }) },
   {
     key: 'coa', label: 'COA', width: 190, kind: 'select',
     get: (r) => r.coa, set: (r, v) => ({ ...r, coa: v }),
@@ -63,8 +65,6 @@ const COLS: Col[] = [
     get: (r) => r.location, set: (r, v) => ({ ...r, location: v.toUpperCase() }),
     options: (m) => m.locations.map((l) => l.code),
   },
-  { key: 'memo', label: 'Memo', width: 150, kind: 'text', get: (r) => r.memo, set: (r, v) => ({ ...r, memo: v }) },
-  { key: 'pages', label: '페이지', width: 74, kind: 'readonly', get: (r) => r.sourcePages.join(',') },
   { key: 'fileName', label: 'FileName', width: 330, kind: 'readonly', get: (r) => buildFileName(r) },
 ]
 
@@ -83,6 +83,13 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   const [error, setError] = useState<string | null>(null)
   // 지금 원본과 대조 중인 행
   const [focusId, setFocusId] = useState<string | null>(null)
+  // 원본을 어떻게 볼지: 안 봄 / 나란히 / 새 창
+  const [mode, setMode] = useState<'off' | 'split' | 'window'>(
+    () => (localStorage.getItem('viewerMode') as 'off' | 'split' | 'window') ?? 'off',
+  )
+  // 나란히 볼 때 표가 차지하는 비율(%)
+  const [ratio, setRatio] = useState(() => Number(localStorage.getItem('viewerRatio')) || 58)
+  const dragBar = useRef(false)
   // '직접 입력…' 으로 전환한 칸들 (행id:컬럼키)
   const [freeform, setFreeform] = useState<Set<string>>(new Set())
 
@@ -182,6 +189,48 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
   // 아무것도 안 고르면 첫 행을 보여준다. 빈 화면보다 낫다.
   const focusRow = view.find((r) => r.id === focusId) ?? view[0] ?? null
 
+  const viewerTarget = {
+    jobId: jobId ?? null,
+    pages: focusRow?.sourcePages ?? [],
+    caption: focusRow
+      ? `${focusRow.vendorName || '(벤더 없음)'} · ${focusRow.invoiceNumber || '(번호 없음)'} · ${focusRow.amount.toFixed(2)}`
+      : undefined,
+  }
+
+  useEffect(() => {
+    localStorage.setItem('viewerMode', mode)
+    if (mode === 'window') void api.openViewerWindow()
+    else void api.closeViewerWindow()
+  }, [mode])
+
+  // 새 창 모드에서는 고른 행이 바뀔 때마다 그 창에 알려 준다.
+  useEffect(() => {
+    if (mode !== 'window') return
+    void api.sendViewerTarget(viewerTarget)
+  }, [mode, viewerTarget.jobId, viewerTarget.pages.join(','), viewerTarget.caption])
+
+  // 분할선 끌기
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!dragBar.current) return
+      const host = document.querySelector('.split') as HTMLElement | null
+      if (!host) return
+      const r = host.getBoundingClientRect()
+      const pct = ((e.clientX - r.left) / r.width) * 100
+      setRatio(Math.min(80, Math.max(28, pct)))
+    }
+    const up = () => {
+      if (dragBar.current) localStorage.setItem('viewerRatio', String(ratio))
+      dragBar.current = false
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+  }, [ratio])
+
   const mismatches = invoices.filter((i) => i.splitCheck === 'mismatch')
   const reviewCount = rows.reduce((a, r) => a + r.needsReview.length, 0)
   const sum = targets.reduce((a, r) => a + r.amount, 0)
@@ -208,6 +257,18 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
         </button>
         {mismatches.length > 0 && <span className="badge err">합계 불일치 {mismatches.length}건</span>}
         {picked.size > 0 && <button onClick={() => setPicked(new Set())}>선택 해제</button>}
+
+        <span className="seg" title="원본 스캔을 어떻게 볼지 고릅니다">
+          <button className={mode === 'off' ? 'on' : ''} onClick={() => setMode('off')}>
+            원본 숨김
+          </button>
+          <button className={mode === 'split' ? 'on' : ''} onClick={() => setMode('split')}>
+            나란히
+          </button>
+          <button className={mode === 'window' ? 'on' : ''} onClick={() => setMode('window')}>
+            새 창
+          </button>
+        </span>
 
         <span className="spacer" />
 
@@ -239,7 +300,10 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
         </div>
       ))}
 
-      <div className="split">
+      <div
+        className={`split ${mode === 'split' ? 'on' : ''}`}
+        style={mode === 'split' ? { gridTemplateColumns: `${ratio}% 6px 1fr` } : undefined}
+      >
       <div className="table-wrap sheet">
         <table>
           <thead>
@@ -377,16 +441,21 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
         </table>
       </div>
 
-      <PageViewer
-        pages={focusRow?.sourcePages ?? []}
-        previews={pagePreviews}
-        jobId={jobId}
-        caption={
-          focusRow
-            ? `${focusRow.vendorName || '(벤더 없음)'} · ${focusRow.invoiceNumber || '(번호 없음)'} · ${focusRow.amount.toFixed(2)}`
-            : undefined
-        }
-      />
+      {mode === 'split' && (
+        <>
+          <div
+            className="dragbar"
+            onMouseDown={() => (dragBar.current = true)}
+            title="끌어서 넓이 조절"
+          />
+          <PageViewer
+            {...viewerTarget}
+            fallback={pagePreviews}
+            onClose={() => setMode('off')}
+            onPopOut={() => setMode('window')}
+          />
+        </>
+      )}
       </div>
 
 

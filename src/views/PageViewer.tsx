@@ -1,72 +1,81 @@
 import { useEffect, useRef, useState } from 'react'
-import * as api from '../lib/api'
+import { renderPage } from '../lib/pdfCache'
 
-interface Props {
-  /** 볼 페이지 번호들 (1-based) */
+export interface ViewerTarget {
+  jobId: string | null
   pages: number[]
-  /** 추출 직후라면 화면이 들고 있는 미리보기. 없으면 디스크에서 읽는다. */
-  previews?: string[]
-  jobId?: string | null
-  /** 표에서 고른 행을 설명하는 짧은 글 */
   caption?: string
 }
 
+interface Props extends ViewerTarget {
+  /** 추출 직후라면 이미 만들어 둔 미리보기. PDF 가 없을 때의 대비책. */
+  fallback?: string[]
+  onClose?: () => void
+  onPopOut?: () => void
+  /** 새 창 모드에서는 머리글을 단순하게 만든다. */
+  standalone?: boolean
+}
+
 /**
- * 원본 스캔 페이지를 크게 보여준다.
+ * 원본 스캔 페이지를 보여준다.
  *
- * 추출 결과가 맞는지 확인하려면 결국 종이를 봐야 한다. 표에서 행을 고르면
- * 그 행이 나온 페이지가 바로 옆에 뜨도록 만든 화면이다.
+ * 표에서 고른 행이 어느 페이지에서 나왔는지 바로 확인하기 위한 화면이다.
+ * 폭에 맞춰 자동으로 크기를 잡고, 확대하면 PDF 에서 더 선명하게 다시 그린다.
  */
-export function PageViewer({ pages, previews, jobId, caption }: Props) {
+export function PageViewer({
+  jobId,
+  pages,
+  caption,
+  fallback,
+  onClose,
+  onPopOut,
+  standalone,
+}: Props) {
   const [idx, setIdx] = useState(0)
   const [zoom, setZoom] = useState(1)
-  const [loaded, setLoaded] = useState<Record<number, string | null>>({})
+  const [src, setSrc] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; y: number; l: number; t: number } | null>(null)
 
-  const page = pages[Math.min(idx, pages.length - 1)]
+  const page = pages[Math.min(idx, Math.max(0, pages.length - 1))]
 
-  // 페이지가 바뀌면 처음 위치로 돌려놓는다.
-  useEffect(() => {
-    setIdx(0)
-  }, [pages.join(',')])
+  useEffect(() => setIdx(0), [pages.join(',')])
 
   useEffect(() => {
-    setZoom(1)
     if (boxRef.current) {
       boxRef.current.scrollTop = 0
       boxRef.current.scrollLeft = 0
     }
   }, [page])
 
-  // 미리보기가 있으면 그대로 쓰고, 없으면 디스크에서 읽어 온다.
-  const src = previews?.[page - 1] ?? loaded[page] ?? null
-
+  // 표시 폭보다 크게 그려야 확대해도 뭉개지지 않는다.
   useEffect(() => {
-    if (!page || src !== null || !jobId) return
-    if (page in loaded) return
+    let alive = true
+    if (!page || !jobId) {
+      setSrc(null)
+      return
+    }
+    const box = boxRef.current?.clientWidth ?? 900
     setLoading(true)
-    api
-      .pageImage(jobId, page)
-      .then((d) => setLoaded((m) => ({ ...m, [page]: d })))
-      .catch(() => setLoaded((m) => ({ ...m, [page]: null })))
-      .finally(() => setLoading(false))
-  }, [page, jobId, src])
+    renderPage(jobId, page, Math.round(box * zoom * 1.5))
+      .then((url) => {
+        if (!alive) return
+        // PDF 가 없는 예전 기록이면 추출 때 만든 이미지로 대체한다.
+        setSrc(url ?? fallback?.[page - 1] ?? null)
+      })
+      .finally(() => alive && setLoading(false))
+    return () => {
+      alive = false
+    }
+  }, [page, jobId, zoom, fallback])
 
   if (!pages.length) {
     return (
       <div className="viewer empty">
-        <div className="muted small">표에서 행을 고르면 그 행이 나온 원본 페이지가 여기 보입니다.</div>
+        <div className="muted small">표에서 행을 고르면 그 행이 나온 원본이 여기 보입니다.</div>
       </div>
     )
-  }
-
-  const onWheel = (e: React.WheelEvent) => {
-    // 확대는 트랙패드 핀치나 Cmd+휠 로만. 그냥 스크롤은 페이지를 훑는 데 쓴다.
-    if (!e.ctrlKey && !e.metaKey) return
-    e.preventDefault()
-    setZoom((z) => Math.min(6, Math.max(0.5, z - e.deltaY * 0.003)))
   }
 
   return (
@@ -77,7 +86,7 @@ export function PageViewer({ pages, previews, jobId, caption }: Props) {
         </button>
         <span className="badge">
           p.{page}
-          {pages.length > 1 && ` (${idx + 1}/${pages.length})`}
+          {pages.length > 1 && ` · ${idx + 1}/${pages.length}`}
         </span>
         <button
           disabled={idx >= pages.length - 1}
@@ -90,20 +99,28 @@ export function PageViewer({ pages, previews, jobId, caption }: Props) {
         {caption && <span className="muted small vcap">{caption}</span>}
 
         <span className="spacer" />
-        <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>−</button>
-        <span className="mono small" style={{ minWidth: 38, textAlign: 'center' }}>
+        <button onClick={() => setZoom((z) => Math.max(0.4, z - 0.25))} title="축소">−</button>
+        <button onClick={() => setZoom(1)} className="mono small" title="폭 맞춤">
           {Math.round(zoom * 100)}%
-        </span>
-        <button onClick={() => setZoom((z) => Math.min(6, z + 0.25))}>+</button>
-        <button onClick={() => setZoom(1)} title="맞춤">
-          맞춤
         </button>
+        <button onClick={() => setZoom((z) => Math.min(5, z + 0.25))} title="확대">+</button>
+
+        {onPopOut && (
+          <button onClick={onPopOut} title="새 창으로 열기 (다른 화면에 놓고 볼 수 있습니다)">
+            ⧉
+          </button>
+        )}
+        {onClose && !standalone && (
+          <button onClick={onClose} title="닫기">
+            ✕
+          </button>
+        )}
       </div>
 
       <div
         className="vbody"
         ref={boxRef}
-        onWheel={onWheel}
+        onDoubleClick={() => setZoom((z) => (z > 1 ? 1 : 2))}
         onMouseDown={(e) => {
           const b = boxRef.current
           if (!b) return
@@ -126,7 +143,7 @@ export function PageViewer({ pages, previews, jobId, caption }: Props) {
           <div className="muted small pad">불러오는 중…</div>
         ) : (
           <div className="muted small pad">
-            이 페이지의 이미지가 없습니다.
+            원본을 찾을 수 없습니다.
             <br />
             설정에서 페이지 이미지를 비웠다면 원본은 볼 수 없습니다 (추출 결과는 그대로입니다).
           </div>
