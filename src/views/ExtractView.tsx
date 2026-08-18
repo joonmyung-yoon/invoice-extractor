@@ -83,6 +83,7 @@ export function ExtractView({ master, prompt, onDone }: Props) {
 
       extraction.set({
         stage: 'done',
+        raw: result,
         rows: norm.rows,
         invoices: norm.invoices,
         unknownVendors: norm.unknownVendors,
@@ -100,7 +101,9 @@ export function ExtractView({ master, prompt, onDone }: Props) {
     extraction.set({ rows: next })
     const id = extraction.get().jobId
     if (id) {
-      await api.saveJobPayload(id, { rows: next, invoices: extraction.get().invoices }).catch(() => {})
+      // raw 를 같이 넘기지 않으면 원본이 지워져 나중에 매핑을 다시 적용할 수 없다.
+      const st = extraction.get()
+      await api.saveJobPayload(id, { raw: st.raw, rows: next, invoices: st.invoices }).catch(() => {})
     }
   }
 

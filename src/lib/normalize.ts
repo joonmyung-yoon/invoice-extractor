@@ -175,3 +175,30 @@ export function checkPageCoverage(invoices: Invoice[], pageCount: number) {
   const duplicated = [...seen.entries()].filter(([, n]) => n > 1).map(([p]) => p)
   return { missing, duplicated, ok: missing.length === 0 && duplicated.length === 0 }
 }
+
+
+/**
+ * 저장된 원본 JSON 에 지금의 매핑 기준표를 다시 적용한다.
+ *
+ * 매핑 시트를 고친 뒤 과거 이력에도 반영하고 싶을 때 쓴다.
+ * 사람이 직접 고친 칸(editedFields)은 그대로 둔다 — 손으로 확인한 값이
+ * 자동 계산 결과로 덮이면 검토한 의미가 없어진다.
+ */
+export function reapply(raw: any, master: Master, previous: Row[]): NormalizeResult {
+  const fresh = normalize(raw, master)
+  const byId = new Map(previous.map((r) => [r.id, r]))
+
+  fresh.rows = fresh.rows.map((r) => {
+    const old = byId.get(r.id)
+    if (!old || old.editedFields.length === 0) return r
+
+    const merged: Row = { ...r, editedFields: old.editedFields }
+    for (const f of old.editedFields) {
+      ;(merged as any)[f] = (old as any)[f]
+      merged.needsReview = merged.needsReview.filter((x) => x !== f)
+    }
+    return merged
+  })
+
+  return fresh
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../lib/api'
-import { normalize } from '../lib/normalize'
+import { normalize, reapply } from '../lib/normalize'
 import { RowsTable } from './RowsTable'
 import type { Invoice, Master, Row } from '../lib/types'
 
@@ -26,6 +26,7 @@ export function HistoryView({ master, reloadKey }: Props) {
   const [sel, setSel] = useState<JobRecord | null>(null)
   const [showPrompt, setShowPrompt] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
 
   const reload = async () => {
     const list = (await api.listJobs()) as JobRecord[]
@@ -93,6 +94,43 @@ export function HistoryView({ master, reloadKey }: Props) {
               </div>
 
               {sel.error && <div className="alert err" style={{ whiteSpace: 'pre-wrap' }}>{sel.error}</div>}
+              {note && <div className="alert ok">{note}</div>}
+
+              {sel.payload?.raw != null && rows.length > 0 && (
+                <div className="alert warn">
+                  <div className="row">
+                    <span>
+                      매핑 기준표를 고쳤다면 이 기록에도 다시 적용할 수 있습니다.
+                      직접 고치신 칸은 그대로 유지됩니다.
+                    </span>
+                    <span className="spacer" />
+                    <button
+                      onClick={async () => {
+                        setNote(null)
+                        const next = reapply(sel.payload.raw, master, rows)
+                        const changed = next.rows.filter((r, i) => {
+                          const o = rows[i]
+                          return !o || JSON.stringify(r) !== JSON.stringify(o)
+                        }).length
+                        await api.saveJobPayload(sel.id, {
+                          ...sel.payload,
+                          rows: next.rows,
+                          invoices: next.invoices,
+                        })
+                        await reload()
+                        setNote(
+                          changed > 0
+                            ? `매핑을 다시 적용해 ${changed}행이 갱신되었습니다.`
+                            : '바뀐 내용이 없습니다. 이미 최신 매핑이 적용되어 있습니다.',
+                        )
+                        setTimeout(() => setNote(null), 4000)
+                      }}
+                    >
+                      매핑 다시 적용
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {(sel.status === 'interrupted' || sel.status === 'error') && (
                 <div className="alert warn">

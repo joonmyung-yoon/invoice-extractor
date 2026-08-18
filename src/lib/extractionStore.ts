@@ -22,6 +22,8 @@ export interface ExtractionState {
   pagesRead: number
   /** 현재 무엇을 하고 있는지 */
   phase: string
+  /** claude 가 뱉은 원본 JSON. 나중에 매핑을 다시 적용하려면 이게 있어야 한다. */
+  raw: unknown
   rows: Row[]
   invoices: Invoice[]
   previews: string[]
@@ -39,6 +41,7 @@ const INITIAL: ExtractionState = {
   error: null,
   pagesRead: 0,
   phase: '',
+  raw: null,
   rows: [],
   invoices: [],
   previews: [],
