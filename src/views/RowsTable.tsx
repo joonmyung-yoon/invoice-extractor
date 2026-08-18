@@ -39,9 +39,11 @@ const CUSTOM = '\u0000custom'
  * 장부에 붙여넣는 컬럼 순서 그대로 보여준다.
  *
  * vendor 는 법인명(모든 행 동일)이고 실제 거래처는 sub-vendor 다.
- * Memo 는 장부 형식에 없는 우리 내부 메모라 '*' 로 구분하고 내보내지 않는다.
+ * '*' 가 붙은 칸(No·Memo)은 장부 형식에 없는 화면 전용이라 복사·내보내기에 나가지 않는다.
  */
 const COLS: Col[] = [
+  // 장부에는 없지만 몇 번째 행인지 서로 가리킬 때 필요하다. 내보내지 않는다.
+  { key: 'no', label: 'No *', width: 52, kind: 'readonly', get: (_r, i) => String(i + 1) },
   {
     key: 'location', label: 'buyer', width: 90, kind: 'select',
     get: (r) => r.location, set: (r, v) => ({ ...r, location: v.toUpperCase() }),
@@ -359,7 +361,7 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
               )}
             </div>
 
-            {COLS.filter((c) => c.kind !== 'readonly' || c.key === 'fileName').map((c) => {
+            {COLS.filter((c) => c.key !== 'no').map((c) => {
               const need = focusRow.needsReview.includes(c.key)
               const fromTable = focusRow.sources?.[c.key] === 'table'
               const hasBox = !!focusRow.boxes?.[c.key]
@@ -371,8 +373,9 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
                   onMouseEnter={() => hasBox && setActiveField(c.key)}
                 >
                   <label className={need ? 'need' : ''}>
-                    {c.label || 'FileName'}
+                    {c.label}
                     {c.key === 'location' && <span className="muted"> (지점)</span>}
+                    {c.key === 'vendorName' && <span className="muted"> (거래처)</span>}
                     {hasBox && <span className="pin" title="원본에서 이 값을 읽어온 자리">◎</span>}
                   </label>
                   {c.kind === 'readonly' ? (
@@ -581,7 +584,8 @@ export function RowsTable({ rows, invoices, master, onChange, pagePreviews, jobI
 
       <div className="small muted" style={{ marginTop: 6 }}>
         왼쪽 체크박스로 행 선택 · Shift+클릭으로 여러 행 한 번에 · 아무것도 선택 안 하면 보이는 행
-        전체가 대상입니다 · 목록에 없는 값이 필요하면 '직접 입력…' 을 고르세요
+        전체가 대상입니다 · 목록에 없는 값이 필요하면 '직접 입력…' 을 고르세요 ·
+        <b> * 표시된 칸(No·Memo)은 장부 형식에 없어 복사·내보내기에 나가지 않습니다</b>
         <span style={{ marginLeft: 10 }}>
           <span className="legend review" /> 확인 필요
           <span className="legend table" /> 매핑에서 채움
