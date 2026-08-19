@@ -17,6 +17,8 @@ export function SettingsView({ master, onMaster }: Props) {
   const [busy, setBusy] = useState<string | null>(null)
   const [stats, setStats] = useState<api.StorageStats | null>(null)
   const [purgeDays, setPurgeDays] = useState('90')
+  // 새 벤더 직접 추가
+  const [nv, setNv] = useState({ name: '', aliases: '', payment: '', card: '', coa: '', notes: '' })
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
   useEffect(() => {
@@ -166,9 +168,15 @@ export function SettingsView({ master, onMaster }: Props) {
                 setMsg({ kind: 'ok', text: '마스터 시트를 초기 데이터로 채웠습니다.' })
               })
             }
-            title="Vendors / Cards / Locations / COA 탭을 만들고 기본 데이터를 채웁니다"
+            title="⚠ 네 탭을 기본 데이터로 덮어씁니다. 직접 추가한 벤더는 사라집니다."
+            onClickCapture={(ev) => {
+              if (!confirm('시트의 Vendors/Cards/Locations/COA 탭을 기본 데이터로 덮어씁니다.\n직접 추가하신 벤더는 사라집니다. 계속할까요?')) {
+                ev.stopPropagation()
+                ev.preventDefault()
+              }
+            }}
           >
-            {busy === 'init' ? '작성 중…' : '시트 초기화'}
+            {busy === 'init' ? '작성 중…' : '시트 초기화 (덮어씀)'}
           </button>
 
           <button
@@ -220,6 +228,98 @@ export function SettingsView({ master, onMaster }: Props) {
               {tab} 복구
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>벤더 추가</h3>
+        <p className="muted small" style={{ margin: '0 0 10px' }}>
+          시트의 <code className="mono">Vendors</code> 탭에 한 줄 붙입니다. 여기 등록해 두면 다음
+          추출부터 결제수단·카드·계정과목이 자동으로 채워집니다.
+        </p>
+
+        <div className="row" style={{ marginBottom: 8 }}>
+          <input
+            placeholder="거래처명 (인보이스에 찍힌 정식 표기)"
+            value={nv.name}
+            onChange={(e) => setNv({ ...nv, name: e.target.value })}
+            style={{ flex: 2, minWidth: 200 }}
+          />
+          <input
+            placeholder="다른 표기 (여러 개면 | 로 구분)"
+            value={nv.aliases}
+            onChange={(e) => setNv({ ...nv, aliases: e.target.value })}
+            style={{ flex: 2, minWidth: 180 }}
+          />
+        </div>
+
+        <div className="row">
+          <select
+            value={nv.payment}
+            onChange={(e) => setNv({ ...nv, payment: e.target.value })}
+            style={{ width: 120 }}
+          >
+            <option value="">결제수단 —</option>
+            {['CARD', 'CHECK', 'ACH'].map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+
+          <select
+            value={nv.card}
+            onChange={(e) => setNv({ ...nv, card: e.target.value })}
+            style={{ width: 130 }}
+            disabled={nv.payment !== 'CARD'}
+            title={nv.payment === 'CARD' ? '' : '결제수단이 CARD 일 때만 씁니다'}
+          >
+            <option value="">기본 카드 —</option>
+            {master.cards.map((c) => <option key={c.cardId} value={c.cardId}>{c.cardId}</option>)}
+          </select>
+
+          <select
+            value={nv.coa}
+            onChange={(e) => setNv({ ...nv, coa: e.target.value })}
+            style={{ width: 200 }}
+          >
+            <option value="">기본 계정과목 —</option>
+            {master.coa.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+
+          <input
+            placeholder="메모"
+            value={nv.notes}
+            onChange={(e) => setNv({ ...nv, notes: e.target.value })}
+            style={{ flex: 1, minWidth: 120 }}
+          />
+
+          <button
+            className="primary"
+            disabled={!!busy || !nv.name.trim()}
+            onClick={() =>
+              run('vendor', async () => {
+                const exists = master.vendors.some(
+                  (v) => v.canonicalName.trim().toLowerCase() === nv.name.trim().toLowerCase(),
+                )
+                if (exists && !confirm(`'${nv.name}' 은(는) 이미 있습니다. 그래도 추가할까요?`)) return
+
+                await api.appendVendor([
+                  nv.name.trim(),
+                  nv.aliases.trim(),
+                  nv.payment,
+                  nv.payment === 'CARD' ? nv.card : '',
+                  nv.coa,
+                  nv.notes.trim(),
+                ])
+                onMaster(await api.syncMaster())
+                setNv({ name: '', aliases: '', payment: '', card: '', coa: '', notes: '' })
+                setMsg({ kind: 'ok', text: `'${nv.name.trim()}' 을(를) 추가했습니다.` })
+              })
+            }
+          >
+            {busy === 'vendor' ? '추가 중…' : '추가'}
+          </button>
+        </div>
+
+        <div className="row small muted" style={{ marginTop: 8 }}>
+          현재 등록된 벤더 {master.vendors.length}개
         </div>
       </div>
 

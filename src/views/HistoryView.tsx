@@ -50,6 +50,18 @@ export function HistoryView({ master, reloadKey }: Props) {
   const rows = sel?.payload?.rows ?? []
   const invoices = sel?.payload?.invoices ?? []
 
+  // 이 기록에 나온 거래처 중 매핑 시트에 없는 것. 등록해 두면 다음부터 자동으로 채워진다.
+  const known = new Set(
+    master.vendors.flatMap((v) => [v.canonicalName, ...v.aliases].map((x) => x.trim().toLowerCase())),
+  )
+  const unknownVendors = [
+    ...new Set(
+      rows
+        .map((r) => r.vendorName?.trim() ?? '')
+        .filter((n) => n && !known.has(n.toLowerCase())),
+    ),
+  ]
+
   return (
     <>
       <h2>이력</h2>
@@ -175,6 +187,47 @@ export function HistoryView({ master, reloadKey }: Props) {
                     >
                       {retrying ? '다시 추출 중…' : '다시 추출'}
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {unknownVendors.length > 0 && (
+                <div className="alert warn">
+                  <b>매핑에 없는 거래처 {unknownVendors.length}곳</b> — 등록해 두면 다음 추출부터
+                  결제수단·카드·계정과목이 자동으로 채워집니다.
+                  <div style={{ marginTop: 6 }}>
+                    {unknownVendors.map((name) => {
+                      const sample = rows.find((r) => r.vendorName === name)
+                      return (
+                        <div key={name} className="row small" style={{ marginTop: 4 }}>
+                          <span className="mono">{name}</span>
+                          {sample?.coa && <span className="muted">{sample.coa}</span>}
+                          {sample?.payment && <span className="muted">{sample.payment}</span>}
+                          <button
+                            style={{ padding: '1px 8px' }}
+                            onClick={async () => {
+                              setNote(null)
+                              try {
+                                await api.appendVendor([
+                                  name,
+                                  '',
+                                  sample?.payment ?? '',
+                                  sample?.cardId ?? '',
+                                  sample?.coa ?? '',
+                                  '이력에서 추가',
+                                ])
+                                setNote(`'${name}' 을(를) 시트에 추가했습니다. 설정에서 동기화하면 반영됩니다.`)
+                                setTimeout(() => setNote(null), 5000)
+                              } catch (err) {
+                                setNote(String(err))
+                              }
+                            }}
+                          >
+                            시트에 추가
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
