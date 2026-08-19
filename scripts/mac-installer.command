@@ -50,8 +50,14 @@ if ! cp -R "$SRC" /Applications/ 2>/dev/null; then
 fi
 
 echo "  보안 격리 표시를 제거하는 중..."
-xattr -dr com.apple.quarantine "$DEST" 2>/dev/null ||
-  sudo xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
+# 인터넷에서 받은 파일에는 macOS 가 격리 표시를 붙인다. 이게 남아 있으면
+# "확인할 수 없습니다" 경고와 함께 실행이 막힌다.
+xattr -cr "$DEST" 2>/dev/null || sudo xattr -cr "$DEST" 2>/dev/null
+
+if xattr "$DEST" 2>/dev/null | grep -q quarantine; then
+  echo "  ⚠️  격리 표시를 지우지 못했습니다. 터미널에 아래를 붙여넣어 주세요:"
+  echo "      xattr -dr com.apple.quarantine \"$DEST\""
+fi
 
 # 복사 과정에서 서명이 깨질 수 있어 다시 입힌다
 codesign --force --deep --sign - "$DEST" >/dev/null 2>&1

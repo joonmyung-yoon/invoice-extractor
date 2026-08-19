@@ -137,13 +137,22 @@ jobs:
           releaseBody: |
             ## 설치 방법
 
-            **macOS** — `.dmg` 를 열어 앱을 응용 프로그램으로 옮긴 뒤,
-            터미널에 아래를 붙여넣고 실행하세요:
+            ### macOS
+
+            **`InvoiceExtractor-*-mac.zip` 을 받으세요.** (`.dmg` 는 설치 도우미가 없습니다.)
+
+            압축을 풀고 **`설치하기.command` 를 우클릭 → 열기** 하면 끝납니다.
+            앱을 응용 프로그램에 넣고 macOS 의 실행 차단을 풀어 줍니다.
+
+            그래도 막히면 터미널에 아래를 붙여넣으세요:
             ```
             xattr -dr com.apple.quarantine "/Applications/Invoice Extractor.app"
             ```
-            서명되지 않은 앱이라 macOS 가 격리 표시를 붙입니다. 위 명령이 그것을 지웁니다.
-            (macOS 15 부터는 "우클릭 → 열기" 로는 열리지 않습니다.)
+
+            > 이 앱은 Apple 개발자 인증서로 서명되어 있지 않습니다. 그래서 인터넷에서 받은
+            > 앱을 그냥 더블클릭하면 **"Apple이 악성 소프트웨어가 없는지 확인할 수 없습니다"**
+            > 가 뜹니다. 앱 문제가 아니라 미서명 앱이면 모두 겪는 일이며,
+            > macOS 15 부터는 앱을 우클릭해서 여는 방법도 통하지 않습니다.
 
             **Windows** — `.msi` 또는 `.exe` 를 실행하세요.
             "Windows에서 PC를 보호했습니다" 가 뜨면 **추가 정보 → 실행**.
@@ -201,6 +210,19 @@ jobs:
           Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
           Write-Host "점검 완료"
 
+      # 맨 .dmg 만 올리면 받는 사람이 앱을 직접 끌어다 놓게 되고, 그때 macOS 가
+      # 격리 표시를 붙여 실행을 막는다. 격리를 풀어 주는 설치 도우미를 함께 묶는다.
+      - name: 맥 배포본 묶기 (설치 도우미 포함)
+        if: runner.os == 'macOS'
+        run: ./scripts/package-mac.sh
+
+      - name: 맥 배포본을 릴리스에 붙이기
+        if: runner.os == 'macOS' && github.ref_type == 'tag'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" release/*.zip --clobber
+
       # 릴리스 생성이 막혀도 설치 파일은 받을 수 있어야 한다.
       # 아티팩트 업로드는 기본 읽기 권한만으로도 동작한다.
       - name: 설치 파일 업로드 (Actions 실행 페이지에서 다운로드)
@@ -211,6 +233,7 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
           path: |
+            release/*.zip
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
