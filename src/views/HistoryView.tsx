@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../lib/api'
 import { normalize, reapply } from '../lib/normalize'
+import { listArchive, saveToArchive, syncArchive } from '../lib/archive'
 import { RowsTable } from './RowsTable'
 import type { Invoice, Master, Row } from '../lib/types'
 
@@ -27,6 +28,8 @@ export function HistoryView({ master, reloadKey }: Props) {
   const [showPrompt, setShowPrompt] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [note, setNote] = useState<string | null>(null)
+  const [archive, setArchive] = useState<{ total: number; pending: number } | null>(null)
+  const [syncing, setSyncing] = useState(false)
 
   const reload = async () => {
     const list = (await api.listJobs()) as JobRecord[]
@@ -36,7 +39,13 @@ export function HistoryView({ master, reloadKey }: Props) {
 
   useEffect(() => {
     void reload()
+    void refreshArchive()
   }, [reloadKey])
+
+  const refreshArchive = async () => {
+    const r = await listArchive().catch(() => null)
+    if (r) setArchive({ total: r.rows.length, pending: r.pending })
+  }
 
   const rows = sel?.payload?.rows ?? []
   const invoices = sel?.payload?.invoices ?? []
@@ -169,6 +178,67 @@ export function HistoryView({ master, reloadKey }: Props) {
                   </div>
                 </div>
               )}
+
+              <div className="panel" style={{ padding: '10px 12px' }}>
+                <div className="row">
+                  <b className="small">구글시트에 보관</b>
+                  {archive && (
+                    <>
+                      <span className="badge">보관 {archive.total}행</span>
+                      {archive.pending > 0 && (
+                        <span className="badge warn">시트 미반영 {archive.pending}행</span>
+                      )}
+                    </>
+                  )}
+                  <span className="spacer" />
+                  <button
+                    disabled={!rows.length}
+                    title="이 기록을 보관 목록에 넣습니다. 인터넷 없이도 저장됩니다."
+                    onClick={async () => {
+                      setNote(null)
+                      try {
+                        const r = await saveToArchive(rows, sel.pdfName)
+                        await refreshArchive()
+                        setNote(`보관에 ${r.saved}행 추가했습니다 (동일 ${r.unchanged}행).`)
+                        setTimeout(() => setNote(null), 4000)
+                      } catch (err) {
+                        setNote(String(err))
+                      }
+                    }}
+                  >
+                    이 기록 보관
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={syncing}
+                    title="양쪽에 없는 기록을 서로 채웁니다."
+                    onClick={async () => {
+                      setSyncing(true)
+                      setNote(null)
+                      try {
+                        const r = await syncArchive()
+                        await refreshArchive()
+                        setNote(
+                          `동기화 완료 — 시트로 ${r.pushed}행, 시트에서 ${r.pulled}행` +
+                            (r.conflicts ? ` · ⚠ 값이 다른 ${r.conflicts}행은 그대로 뒀습니다` : ''),
+                        )
+                        setTimeout(() => setNote(null), 6000)
+                      } catch (err) {
+                        setNote(String(err))
+                      } finally {
+                        setSyncing(false)
+                      }
+                    }}
+                  >
+                    {syncing ? '동기화 중…' : '구글시트와 동기화'}
+                  </button>
+                </div>
+                <p className="muted small" style={{ margin: '6px 0 0' }}>
+                  장부와 별개인 우리 작업 기록입니다. 메모·원본 PDF 이름까지 남으며
+                  시트의 <code className="mono">History</code> 탭에 들어갑니다 — 장부용 복사에는
+                  섞이지 않습니다.
+                </p>
+              </div>
 
               {showPrompt && (
                 <div className="panel">

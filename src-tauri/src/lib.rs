@@ -719,7 +719,7 @@ async fn append_vendor(state: State<'_, AppState>, row: Vec<String>) -> Result<(
 
 /// 장부 키. DATE + Invoice_number + LOCATION 조합으로 같은 내역을 식별한다.
 fn record_key(row: &[String], header: &[String]) -> String {
-    ["DATE", "Invoice_number", "LOCATION"]
+    ["date", "invoiceno", "buyer"]
         .iter()
         .map(|name| {
             header
@@ -791,10 +791,10 @@ async fn sync_records(
         db::list_records(&conn).map_err(e)?
     };
 
-    let sheet_rows = if client.tab_exists("Records").await.map_err(e)? {
-        client.read_tab("Records").await.map_err(e)?
+    let sheet_rows = if client.tab_exists("History").await.map_err(e)? {
+        client.read_tab("History").await.map_err(e)?
     } else {
-        client.append_rows("Records", vec![header.clone()]).await.map_err(e)?;
+        client.append_rows("History", vec![header.clone()]).await.map_err(e)?;
         vec![header.clone()]
     };
 
@@ -825,7 +825,7 @@ async fn sync_records(
             Some(_) => {}
         }
     }
-    let pushed = client.append_rows("Records", push_rows).await.map_err(e)?;
+    let pushed = client.append_rows("History", push_rows).await.map_err(e)?;
 
     // 시트에만 있는 것 → 로컬로 내린다.
     let stamp = now();
@@ -851,7 +851,7 @@ async fn sync_records(
 #[tauri::command]
 async fn read_records(state: State<'_, AppState>) -> Result<Vec<Vec<String>>, String> {
     let (client, _) = connect(&state).await?;
-    client.read_tab("Records").await.map_err(e)
+    client.read_tab("History").await.map_err(e)
 }
 
 // ── setup ─────────────────────────────────────────────────────────
