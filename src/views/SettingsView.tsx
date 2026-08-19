@@ -194,6 +194,33 @@ export function SettingsView({ master, onMaster }: Props) {
             {master.syncedAt ? `마지막 동기화 ${master.syncedAt}` : '아직 동기화 안 됨'}
           </span>
         </div>
+
+        <div className="row" style={{ marginTop: 10 }}>
+          <span className="muted small">시트 내용이 지워졌다면</span>
+          {(['Vendors', 'Cards', 'Locations', 'COA'] as const).map((tab) => (
+            <button
+              key={tab}
+              disabled={!!busy}
+              title={`마지막 동기화 시점의 로컬 캐시로 ${tab} 탭을 되살립니다. 시트에만 있는 행은 그대로 둡니다.`}
+              onClick={() =>
+                run('restore', async () => {
+                  if (!confirm(`${tab} 탭을 로컬 캐시로 되살립니다. 시트에만 있는 행은 유지됩니다. 계속할까요?`))
+                    return
+                  const r = await api.restoreMasterTab(tab)
+                  onMaster(await api.syncMaster())
+                  setMsg({
+                    kind: 'ok',
+                    text:
+                      `${tab} 탭을 ${r.restored}행으로 되살렸습니다` +
+                      (r.kept ? ` (시트에만 있던 ${r.kept}행 유지).` : '.'),
+                  })
+                })
+              }
+            >
+              {tab} 복구
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="panel">

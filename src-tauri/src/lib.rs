@@ -712,9 +712,59 @@ async fn init_master_sheet(
 #[tauri::command]
 async fn append_vendor(state: State<'_, AppState>, row: Vec<String>) -> Result<(), String> {
     let (client, _) = connect(&state).await?;
-    let mut rows = client.read_tab("Vendors").await.map_err(e)?;
-    rows.push(row);
-    client.write_tab("Vendors", rows).await.map_err(e)
+    // 반드시 append 로 붙인다. 읽어서 통째로 다시 쓰면 버튼을 연달아 누를 때
+    // 서로 덮어써서 기존 벤더가 통째로 사라진다(실제로 그런 사고가 있었다).
+    client.append_rows("Vendors", vec![row]).await.map_err(e)?;
+    Ok(())
+}
+
+/// 마스터 탭을 로컬 캐시로 되살린다.
+///
+/// 시트 내용이 지워졌을 때 쓴다. 마지막 동기화 시점의 캐시를 바탕으로 하되,
+/// 지금 시트에만 있는 행(캐시 이후에 추가된 것)은 그대로 살려 둔다.
+#[tauri::command]
+async fn restore_master_tab(
+    state: State<'_, AppState>,
+    tab: String,
+) -> Result<serde_json::Value, String> {
+    let cached: Vec<Vec<String>> = {
+        let conn = state.db.0.lock().unwrap();
+        let found = db::read_master_cache(&conn)
+            .map_err(e)?
+            .into_iter()
+            .find(|(t, _, _)| *t == tab);
+        match found {
+            Some((_, json, _)) => serde_json::from_str(&json).unwrap_or_default(),
+            None => return Err(format!("{tab} 탭의 로컬 캐시가 없습니다.")),
+        }
+    };
+    if cached.is_empty() {
+        return Err(format!("{tab} 탭의 로컬 캐시가 비어 있습니다."));
+    }
+
+    let (client, _) = connect(&state).await?;
+    let current = client.read_tab(&tab).await.unwrap_or_default();
+
+    // 첫 칸(이름)을 기준으로 이미 있는 것은 건너뛴다.
+    let known: std::collections::HashSet<String> = cached
+        .iter()
+        .filter_map(|r| r.first().map(|x| x.trim().to_lowercase()))
+        .collect();
+
+    let mut merged = cached.clone();
+    let mut kept = 0usize;
+    for r in current.into_iter().skip(1) {
+        let name = r.first().map(|x| x.trim().to_lowercase()).unwrap_or_default();
+        if name.is_empty() || known.contains(&name) {
+            continue;
+        }
+        merged.push(r);
+        kept += 1;
+    }
+
+    let total = merged.len().saturating_sub(1);
+    client.write_tab(&tab, merged).await.map_err(e)?;
+    Ok(serde_json::json!({ "restored": total, "kept": kept }))
 }
 
 /// 장부 키. DATE + Invoice_number + LOCATION 조합으로 같은 내역을 식별한다.
@@ -966,6 +1016,7 @@ pub fn run() {
             cached_master,
             init_master_sheet,
             append_vendor,
+            restore_master_tab,
             save_records_local,
             list_records_local,
             delete_record_local,

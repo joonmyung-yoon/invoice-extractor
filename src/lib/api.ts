@@ -147,6 +147,10 @@ export const initMasterSheet = (tabs: Record<string, string[][]>) =>
   invoke<void>('init_master_sheet', { tabs })
 export const appendVendor = (row: string[]) => invoke<void>('append_vendor', { row })
 
+/** 시트 내용이 지워졌을 때 로컬 캐시로 되살린다. 시트에만 있는 행은 유지한다. */
+export const restoreMasterTab = (tab: string) =>
+  invoke<{ restored: number; kept: number }>('restore_master_tab', { tab })
+
 // 장부는 로컬이 1차 저장소다. 시트는 나중에 동기화한다.
 export const saveRecordsLocal = (header: string[], rows: string[][]) =>
   invoke<{ saved: number; unchanged: number; pending: number; dropped: number }>(
