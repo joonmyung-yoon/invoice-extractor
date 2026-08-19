@@ -25,3 +25,5 @@ export const saveToArchive = (rows: Row[], pdfName: string) =>
 export const syncArchive = () => api.syncRecords([...ARCHIVE_COLUMNS])
 
 export const listArchive = () => api.listRecordsLocal()
+
+export const rewriteArchive = () => api.rewriteArchive([...ARCHIVE_COLUMNS])

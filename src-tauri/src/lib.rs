@@ -741,6 +741,8 @@ fn save_records_local(
     rows: Vec<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
     let conn = state.db.0.lock().unwrap();
+    // 형식이 바뀌기 전에 보관한 행은 컬럼이 어긋나 쓸 수 없다. 시트로 나가기 전에 치운다.
+    let dropped = db::purge_mismatched_records(&conn, header.len()).map_err(e)?;
     let stamp = now();
     let mut changed = 0usize;
     let mut same = 0usize;
@@ -753,7 +755,9 @@ fn save_records_local(
         }
     }
     let pending = db::unsynced_count(&conn).map_err(e)?;
-    Ok(serde_json::json!({ "saved": changed, "unchanged": same, "pending": pending }))
+    Ok(serde_json::json!({
+        "saved": changed, "unchanged": same, "pending": pending, "dropped": dropped
+    }))
 }
 
 /// 로컬 장부 전체를 돌려준다.
@@ -786,9 +790,11 @@ async fn sync_records(
 ) -> Result<serde_json::Value, String> {
     let (client, _) = connect(&state).await?;
 
-    let local = {
+    let (local, dropped) = {
         let conn = state.db.0.lock().unwrap();
-        db::list_records(&conn).map_err(e)?
+        // 옛 형식 행이 섞여 있으면 시트의 컬럼이 통째로 밀린다. 먼저 치운다.
+        let dropped = db::purge_mismatched_records(&conn, header.len()).map_err(e)?;
+        (db::list_records(&conn).map_err(e)?, dropped)
     };
 
     let sheet_rows = if client.tab_exists("History").await.map_err(e)? {
@@ -799,6 +805,9 @@ async fn sync_records(
     };
 
     let sheet_header = sheet_rows.first().cloned().unwrap_or_else(|| header.clone());
+    if sheet_header != header {
+        bail_sync(&sheet_header, &header)?;
+    }
     let sheet_body: Vec<&Vec<String>> = sheet_rows
         .iter()
         .skip(1)
@@ -843,8 +852,48 @@ async fn sync_records(
     }
 
     Ok(serde_json::json!({
-        "pushed": pushed, "pulled": pulled, "conflicts": conflicts, "syncedAt": stamp
+        "pushed": pushed, "pulled": pulled, "conflicts": conflicts,
+        "dropped": dropped, "syncedAt": stamp
     }))
+}
+
+/// 시트 헤더가 지금 형식과 다르면 그대로 붙이면 안 된다.
+fn bail_sync(sheet: &[String], expected: &[String]) -> Result<(), String> {
+    Err(format!(
+        "시트의 History 탭이 지금 형식과 다릅니다.\n\n시트: {}\n지금: {}\n\n         '보관 초기화' 로 탭을 다시 쓴 뒤 동기화해 주세요.",
+        sheet.join(", "),
+        expected.join(", ")
+    ))
+}
+
+/// History 탭을 지금 로컬 내용으로 통째로 다시 쓴다.
+///
+/// 형식이 바뀌어 컬럼이 어긋났거나 같은 기록이 중복으로 쌓였을 때 쓴다.
+#[tauri::command]
+async fn rewrite_archive(
+    state: State<'_, AppState>,
+    header: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let (client, _) = connect(&state).await?;
+
+    let (local, dropped) = {
+        let conn = state.db.0.lock().unwrap();
+        let dropped = db::purge_mismatched_records(&conn, header.len()).map_err(e)?;
+        (db::list_records(&conn).map_err(e)?, dropped)
+    };
+
+    let mut rows = vec![header.clone()];
+    rows.extend(local.iter().map(|r| r.values.clone()));
+    client.write_tab("History", rows).await.map_err(e)?;
+
+    {
+        let conn = state.db.0.lock().unwrap();
+        let keys: Vec<String> = local.iter().map(|r| r.key.clone()).collect();
+        db::mark_synced(&conn, &keys).map_err(e)?;
+        db::set_setting(&conn, "records_synced_at", &now()).map_err(e)?;
+    }
+
+    Ok(serde_json::json!({ "written": local.len(), "dropped": dropped }))
 }
 
 /// Records 탭 전체를 읽어온다 (과거 내역 조회용).
@@ -921,6 +970,7 @@ pub fn run() {
             list_records_local,
             delete_record_local,
             sync_records,
+            rewrite_archive,
             read_records,
         ])
         .build(tauri::generate_context!())

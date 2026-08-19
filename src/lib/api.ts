@@ -149,7 +149,10 @@ export const appendVendor = (row: string[]) => invoke<void>('append_vendor', { r
 
 // 장부는 로컬이 1차 저장소다. 시트는 나중에 동기화한다.
 export const saveRecordsLocal = (header: string[], rows: string[][]) =>
-  invoke<{ saved: number; unchanged: number; pending: number }>('save_records_local', { header, rows })
+  invoke<{ saved: number; unchanged: number; pending: number; dropped: number }>(
+    'save_records_local',
+    { header, rows },
+  )
 
 export const listRecordsLocal = () =>
   invoke<{ rows: { key: string; values: string[]; synced: boolean }[]; pending: number }>(
@@ -159,9 +162,17 @@ export const listRecordsLocal = () =>
 export const deleteRecordLocal = (key: string) => invoke<void>('delete_record_local', { key })
 
 export const syncRecords = (header: string[]) =>
-  invoke<{ pushed: number; pulled: number; conflicts: number; syncedAt: string }>('sync_records', {
-    header,
-  })
+  invoke<{
+    pushed: number
+    pulled: number
+    conflicts: number
+    dropped: number
+    syncedAt: string
+  }>('sync_records', { header })
+
+/** History 탭을 로컬 내용으로 통째로 다시 쓴다. 형식이 어긋났거나 중복이 쌓였을 때. */
+export const rewriteArchive = (header: string[]) =>
+  invoke<{ written: number; dropped: number }>('rewrite_archive', { header })
 
 export const readRecords = () => invoke<string[][]>('read_records')
 

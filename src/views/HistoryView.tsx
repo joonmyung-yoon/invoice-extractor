@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../lib/api'
 import { normalize, reapply } from '../lib/normalize'
-import { listArchive, saveToArchive, syncArchive } from '../lib/archive'
+import { listArchive, rewriteArchive, saveToArchive, syncArchive } from '../lib/archive'
 import { RowsTable } from './RowsTable'
 import type { Invoice, Master, Row } from '../lib/types'
 
@@ -199,7 +199,10 @@ export function HistoryView({ master, reloadKey }: Props) {
                       try {
                         const r = await saveToArchive(rows, sel.pdfName)
                         await refreshArchive()
-                        setNote(`보관에 ${r.saved}행 추가했습니다 (동일 ${r.unchanged}행).`)
+                        setNote(
+                          `보관에 ${r.saved}행 추가했습니다 (동일 ${r.unchanged}행)` +
+                            (r.dropped ? ` · 옛 형식 ${r.dropped}행 정리` : '') + '.',
+                        )
                         setTimeout(() => setNote(null), 4000)
                       } catch (err) {
                         setNote(String(err))
@@ -220,6 +223,7 @@ export function HistoryView({ master, reloadKey }: Props) {
                         await refreshArchive()
                         setNote(
                           `동기화 완료 — 시트로 ${r.pushed}행, 시트에서 ${r.pulled}행` +
+                            (r.dropped ? ` · 옛 형식 ${r.dropped}행 정리` : '') +
                             (r.conflicts ? ` · ⚠ 값이 다른 ${r.conflicts}행은 그대로 뒀습니다` : ''),
                         )
                         setTimeout(() => setNote(null), 6000)
@@ -231,6 +235,32 @@ export function HistoryView({ master, reloadKey }: Props) {
                     }}
                   >
                     {syncing ? '동기화 중…' : '구글시트와 동기화'}
+                  </button>
+                  <button
+                    className="danger"
+                    disabled={syncing}
+                    title="시트의 History 탭을 지우고 지금 로컬 내용으로 다시 씁니다. 형식이 어긋났거나 중복이 쌓였을 때 쓰세요."
+                    onClick={async () => {
+                      if (!confirm('시트의 History 탭을 지우고 지금 보관 내용으로 다시 씁니다. 계속할까요?'))
+                        return
+                      setSyncing(true)
+                      setNote(null)
+                      try {
+                        const r = await rewriteArchive()
+                        await refreshArchive()
+                        setNote(
+                          `History 탭을 ${r.written}행으로 다시 썼습니다` +
+                            (r.dropped ? ` · 옛 형식 ${r.dropped}행 정리` : '') + '.',
+                        )
+                        setTimeout(() => setNote(null), 6000)
+                      } catch (err) {
+                        setNote(String(err))
+                      } finally {
+                        setSyncing(false)
+                      }
+                    }}
+                  >
+                    보관 초기화
                   </button>
                 </div>
                 <p className="muted small" style={{ margin: '6px 0 0' }}>

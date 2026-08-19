@@ -175,6 +175,29 @@ pub fn delete_record(conn: &Connection, key: &str) -> Result<()> {
     Ok(())
 }
 
+/// 지금 형식과 칸 수가 다른 기록을 지운다.
+///
+/// 장부 형식이 바뀌면 예전에 보관한 행은 컬럼이 어긋나 쓸 수 없다. 그대로 두면
+/// 동기화 때 시트로 밀려 들어가 표를 망가뜨린다.
+pub fn purge_mismatched_records(conn: &Connection, expected_len: usize) -> Result<usize> {
+    let stale: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT key, values_json FROM records")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.filter_map(|x| x.ok())
+            .filter(|(_, json)| {
+                serde_json::from_str::<Vec<String>>(json)
+                    .map(|v| v.len() != expected_len)
+                    .unwrap_or(true)
+            })
+            .map(|(k, _)| k)
+            .collect()
+    };
+    for k in &stale {
+        conn.execute("DELETE FROM records WHERE key = ?1", params![k])?;
+    }
+    Ok(stale.len())
+}
+
 pub fn unsynced_count(conn: &Connection) -> Result<i64> {
     Ok(conn.query_row("SELECT COUNT(*) FROM records WHERE synced = 0", [], |r| r.get(0))?)
 }
