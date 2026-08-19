@@ -990,15 +990,15 @@ mod tests {
     }
 
     #[test]
-    fn record_key_uses_date_invoice_location() {
-        let header: Vec<String> = ["DATE", "Invoice_number", "AMT", "LOCATION"]
+    fn record_key_uses_date_invoice_buyer() {
+        let header: Vec<String> = ["date", "invoiceno", "amt", "buyer"]
             .iter().map(|s| s.to_string()).collect();
         let row: Vec<String> = ["08/15/2026", "3040-13", "457.98", "IFO"]
             .iter().map(|s| s.to_string()).collect();
         assert_eq!(record_key(&row, &header), "08/15/2026\u{1}3040-13\u{1}IFO");
 
         // 컬럼 순서가 바뀌어도 헤더 이름으로 찾으므로 같은 키가 나와야 한다
-        let header2: Vec<String> = ["LOCATION", "AMT", "DATE", "Invoice_number"]
+        let header2: Vec<String> = ["buyer", "amt", "date", "invoiceno"]
             .iter().map(|s| s.to_string()).collect();
         let row2: Vec<String> = ["IFO", "457.98", "08/15/2026", "3040-13"]
             .iter().map(|s| s.to_string()).collect();
