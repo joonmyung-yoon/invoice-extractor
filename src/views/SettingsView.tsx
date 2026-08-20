@@ -23,7 +23,7 @@ export function SettingsView({ master, onMaster }: Props) {
 
   useEffect(() => {
     api.claudeStatus().then(setClaude).catch((e) => setClaude(`❌ ${e}`))
-    api.serviceAccountEmail().then(setEmail).catch(() => {})
+    api.serviceAccountEmail().then(setEmail).catch((e) => setMsg({ kind: 'err', text: String(e) }))
     api.getSetting('sheet_url').then((v) => setSheetUrl(v ?? ''))
     api.getSetting('claude_path').then((v) => setClaudePath(v ?? ''))
     api.dataDir().then(setDir)
@@ -33,8 +33,9 @@ export function SettingsView({ master, onMaster }: Props) {
   const loadStats = async () => {
     try {
       setStats(await api.storageStats())
-    } catch {
-      /* 용량 조회 실패가 앱 사용을 막을 이유는 없다 */
+    } catch (err) {
+      // 용량 조회 실패가 앱 사용을 막을 이유는 없지만 조용히 넘기지는 않는다.
+      console.warn('용량 조회 실패:', err)
     }
   }
 

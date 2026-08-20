@@ -68,7 +68,7 @@ async fn access_token(key: &ServiceAccountKey) -> Result<String> {
         ])
         .send()
         .await
-        .context("구글 토큰 서버에 접속하지 못했습니다. 네트워크를 확인해 주세요.")?;
+        .context("구글 인증 서버에 접속하지 못했습니다. 인터넷 연결을 확인해 주세요.")?;
 
     let status = res.status();
     let body = res.text().await.unwrap_or_default();
@@ -124,7 +124,7 @@ impl SheetsClient {
             .bearer_auth(&self.token)
             .send()
             .await
-            .context("구글시트에 접속하지 못했습니다.")?;
+            .context("구글시트에 접속하지 못했습니다. 인터넷 연결을 확인해 주세요.")?;
         self.handle(res).await
     }
 
@@ -136,7 +136,7 @@ impl SheetsClient {
             .json(&body)
             .send()
             .await
-            .context("구글시트에 접속하지 못했습니다.")?;
+            .context("구글시트에 접속하지 못했습니다. 인터넷 연결을 확인해 주세요.")?;
         self.handle(res).await
     }
 
@@ -148,24 +148,39 @@ impl SheetsClient {
             .json(&body)
             .send()
             .await
-            .context("구글시트에 접속하지 못했습니다.")?;
+            .context("구글시트에 접속하지 못했습니다. 인터넷 연결을 확인해 주세요.")?;
         self.handle(res).await
     }
 
+    /// 응답을 해석한다. 무엇이 잘못됐는지 구분해서 알려 준다 —
+    /// "연결 실패" 한 줄로는 인터넷 문제인지 권한 문제인지 알 수 없다.
     async fn handle(&self, res: reqwest::Response) -> Result<serde_json::Value> {
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
-        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND {
-            // 가장 흔한 실수라 따로 안내한다.
-            bail!(
-                "시트에 접근할 수 없습니다({status}). 구글시트 '공유'에서 서비스 계정 이메일을 \
-                 편집자로 추가했는지 확인해 주세요."
-            );
+
+        match status {
+            s if s.is_success() => {
+                serde_json::from_str(&body).context("구글시트 응답을 해석하지 못했습니다.")
+            }
+            reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND => bail!(
+                "시트에 접근할 수 없습니다 ({status}).\n\
+                 구글시트 '공유'에서 서비스 계정 이메일이 편집자로 들어가 있는지, \
+                 시트 URL 이 맞는지 확인해 주세요."
+            ),
+            reqwest::StatusCode::TOO_MANY_REQUESTS => bail!(
+                "구글이 잠시 요청을 제한하고 있습니다 (429).\n\
+                 몇 분 뒤에 다시 시도하면 풀립니다. 계정이 차단된 것이 아닙니다."
+            ),
+            reqwest::StatusCode::UNAUTHORIZED => bail!(
+                "인증에 실패했습니다 (401).\n\
+                 서비스 계정 키가 만료되었거나 삭제되었을 수 있습니다. 설정에서 키를 다시 넣어 주세요."
+            ),
+            s if s.is_server_error() => bail!(
+                "구글 서버가 응답하지 못했습니다 ({status}).\n\
+                 구글 쪽 일시적인 문제입니다. https://www.google.com/appsstatus 에서 상태를 확인할 수 있습니다."
+            ),
+            _ => bail!("구글시트 API 오류 ({status}): {}", body.chars().take(300).collect::<String>()),
         }
-        if !status.is_success() {
-            bail!("구글시트 API 오류({status}): {body}");
-        }
-        serde_json::from_str(&body).context("구글시트 응답을 해석하지 못했습니다.")
     }
 
     pub async fn info(&self, client_email: &str) -> Result<SheetInfo> {

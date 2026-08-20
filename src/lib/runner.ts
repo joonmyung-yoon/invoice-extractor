@@ -27,7 +27,10 @@ export async function runJob(job: Job, master: Master, prompt: Prompt, maxChunks
       promptSnapshot: body,
     })
     p({ jobId })
-    await api.storePdf(jobId, new Uint8Array(bytes)).catch(() => {})
+    await api.storePdf(jobId, new Uint8Array(bytes)).catch((err) =>
+        // 보관에 실패해도 추출은 계속한다. 원본 대조만 불가능해진다.
+        console.warn('원본 PDF 보관 실패:', err),
+      )
 
     // 페이지를 한 번만 그려 두고 조각마다 나눠 쓴다.
     const images: string[] = []

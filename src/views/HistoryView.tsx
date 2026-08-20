@@ -43,7 +43,10 @@ export function HistoryView({ master, reloadKey }: Props) {
   }, [reloadKey])
 
   const refreshArchive = async () => {
-    const r = await listArchive().catch(() => null)
+    const r = await listArchive().catch((err) => {
+      console.warn('보관 목록 조회 실패:', err)
+      return null
+    })
     if (r) setArchive({ total: r.rows.length, pending: r.pending })
   }
 

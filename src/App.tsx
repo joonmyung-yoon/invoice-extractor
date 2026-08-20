@@ -29,6 +29,9 @@ function MainApp() {
   const [historyKey, setHistoryKey] = useState(0)
   const [ready, setReady] = useState(false)
   const [recovered, setRecovered] = useState<{ pdfName: string; rows: number }[]>([])
+  // 동기화 실패를 삼키면 "연결이 안 된다" 만 보이고 왜인지는 알 수 없다.
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState(false)
   const ext = useExtraction()
 
   useEffect(() => {
@@ -48,7 +51,7 @@ function MainApp() {
 
       // 오프라인에서도 바로 쓰도록 캐시를 먼저 올리고, 되면 시트에서 갱신한다.
       setMaster(await api.cachedMaster().catch(() => EMPTY_MASTER))
-      api.syncMaster().then(setMaster).catch(() => {})
+      void refreshMaster()
 
       setReady(true)
 
@@ -61,6 +64,19 @@ function MainApp() {
       }
     })()
   }, [])
+
+  /** 시트에서 매핑을 다시 받아온다. 실패하면 이유를 화면에 남긴다. */
+  const refreshMaster = async () => {
+    setRetrying(true)
+    try {
+      setMaster(await api.syncMaster())
+      setSyncError(null)
+    } catch (err) {
+      setSyncError(String(err))
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   const choosePrompt = async (id: string) => {
     setActivePromptId(id)
@@ -116,6 +132,22 @@ function MainApp() {
       </aside>
 
       <main className="main">
+        {syncError && (
+          <div className="alert err" style={{ whiteSpace: 'pre-wrap' }}>
+            <b>구글시트에서 매핑 기준표를 받아오지 못했습니다.</b>
+            <div style={{ margin: '6px 0' }}>{syncError}</div>
+            <div className="row small">
+              <span className="muted">
+                마지막으로 받아 둔 내용(벤더 {master.vendors.length}개)으로 계속 쓸 수 있습니다.
+              </span>
+              <span className="spacer" />
+              <button disabled={retrying} onClick={refreshMaster}>
+                {retrying ? '다시 시도 중…' : '다시 시도'}
+              </button>
+              <button onClick={() => setSyncError(null)}>닫기</button>
+            </div>
+          </div>
+        )}
         {recovered.length > 0 && (
           <div className="alert ok">
             지난번에 끝내지 못한 추출 {recovered.length}건을 되살렸습니다 —{' '}

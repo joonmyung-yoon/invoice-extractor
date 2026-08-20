@@ -15,8 +15,16 @@ export async function recoverUnfinished(master: Master): Promise<
 > {
   const recovered: { pdfName: string; rows: number }[] = []
 
-  for (const job of await api.unfinishedJobs().catch(() => [])) {
-    const parts = await api.chunkResults(job.id).catch(() => [])
+  const unfinished = await api.unfinishedJobs().catch((err) => {
+    console.warn('미완료 작업 조회 실패:', err)
+    return []
+  })
+
+  for (const job of unfinished) {
+    const parts = await api.chunkResults(job.id).catch((err) => {
+      console.warn(`${job.pdfName} 결과 복구 실패:`, err)
+      return []
+    })
     if (!parts.length) continue
 
     const merged = mergeResults(parts)
