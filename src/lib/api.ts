@@ -6,6 +6,17 @@ import type { Master, Payment, VendorRule } from './types'
 
 export const claudeStatus = () => invoke<string>('claude_status')
 
+export interface ClaudeReadiness {
+  path: string
+  version: string
+  /** 실제 요청이 통했는지. false 면 설치는 됐지만 로그인이 안 된 것이다. */
+  loggedIn: boolean
+  detail: string
+}
+
+/** claude 를 다시 찾고 로그인까지 확인한다. 짧은 요청을 한 번 보내므로 몇 초 걸린다. */
+export const claudeRescan = () => invoke<ClaudeReadiness>('claude_rescan')
+
 export const stagePages = (
   jobId: string,
   chunk: number,

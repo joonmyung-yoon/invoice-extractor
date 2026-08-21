@@ -55,6 +55,36 @@ fn now() -> String {
 
 // ── claude ────────────────────────────────────────────────────────
 
+/// claude 를 다시 찾는다.
+///
+/// 앱을 켜 둔 채로 Claude Code 를 지웠다 다시 깔면 경로가 바뀔 수 있다.
+/// 저장해 둔 경로가 더 이상 유효하지 않으면 지우고 처음부터 다시 찾는다.
+#[tauri::command]
+async fn claude_rescan(state: State<'_, AppState>) -> Result<claude::Readiness, String> {
+    {
+        let conn = state.db.0.lock().unwrap();
+        if let Some(p) = db::get_setting(&conn, "claude_path").map_err(e)? {
+            if !p.trim().is_empty() && !std::path::Path::new(&p).is_file() {
+                // 지워진 경로가 남아 있으면 자동 탐색을 가로막는다.
+                db::set_setting(&conn, "claude_path", "").map_err(e)?;
+            }
+        }
+    }
+
+    let configured = {
+        let conn = state.db.0.lock().unwrap();
+        db::get_setting(&conn, "claude_path").map_err(e)?
+    };
+    let cli = claude::resolve_cli(configured.as_deref()).map_err(e)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        claude::check_ready(&cli, Duration::from_secs(90))
+    })
+    .await
+    .map_err(|x| x.to_string())?
+    .map_err(e)
+}
+
 #[tauri::command]
 fn claude_status(state: State<AppState>) -> Result<String, String> {
     let conn = state.db.0.lock().unwrap();
@@ -984,6 +1014,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             claude_status,
+            claude_rescan,
             stage_pages,
             run_extraction,
             create_job,

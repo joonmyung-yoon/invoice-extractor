@@ -201,13 +201,14 @@ pub fn run_extraction(
         .current_dir(workdir)
         .arg("-p")
         .arg(prompt)
-        // 페이지 이미지를 읽는 것만 허용한다.
+        // 결과는 응답으로 받는 것이 정본이다. PC 에 따라 Claude Code 의 안전 검사가
+        // 파일 쓰기를 거부해(safetyCheck) 추출이 통째로 실패한 적이 있다.
         //
-        // 예전에는 결과를 파일로 쓰게 했는데, PC 에 따라 Claude Code 의 안전 검사가
-        // 쓰기를 거부해(safetyCheck) 추출이 통째로 실패했다. 결과를 응답으로 직접
-        // 받으면 쓰기 권한 자체가 필요 없어 그 실패가 원천적으로 사라진다.
+        // 다만 쓰기도 함께 허용한다. 앱이 강제 종료되면 응답을 받아 갈 주체가 없어
+        // 결과가 사라지는데, 파일이 남아 있으면 다시 켤 때 되살릴 수 있다.
+        // 쓰기가 거부돼도 응답이 있으므로 추출은 성공한다.
         .arg("--allowedTools")
-        .arg("Read")
+        .arg("Read,Write")
         .arg("--permission-mode")
         .arg("acceptEdits")
         // 사용자 환경의 MCP 서버를 끌고 들어오지 않는다 (외부 유출 차단).
@@ -404,6 +405,82 @@ pub fn run_extraction(
         extracted_json: std::fs::read_to_string(&out_path)?,
         elapsed_ms: started.elapsed().as_millis(),
     })
+}
+
+/// 로그인까지 확인한 결과.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Readiness {
+    pub path: String,
+    pub version: String,
+    /// 실제로 요청이 통했는지. false 면 설치는 됐지만 로그인이 안 된 것이다.
+    pub logged_in: bool,
+    pub detail: String,
+}
+
+/// 로그인 여부까지 확인한다.
+///
+/// `claude --version` 은 로그아웃 상태에서도 성공하므로 설치 확인용일 뿐이다.
+/// 실제로 통하는지 알려면 아주 짧은 요청을 한 번 보내 보는 수밖에 없다.
+pub fn check_ready(cli: &Path, timeout: Duration) -> Result<Readiness> {
+    let version = health_check(cli)?;
+
+    let mut child = std::process::Command::new(cli)
+        .arg("-p")
+        .arg("Reply with exactly: OK")
+        // 도구도 MCP 도 쓰지 않는 최소 요청이라 비용이 거의 들지 않는다.
+        .arg("--allowedTools")
+        .arg("")
+        .arg("--strict-mcp-config")
+        .arg("--mcp-config")
+        .arg("{\"mcpServers\":{}}")
+        .arg("--output-format")
+        .arg("json")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("claude 실행 실패: {}", cli.display()))?;
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait()? {
+            Some(_) => break,
+            None => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    return Ok(Readiness {
+                        path: cli.display().to_string(),
+                        version,
+                        logged_in: false,
+                        detail: "응답이 없어 확인을 중단했습니다. 네트워크를 확인해 주세요.".into(),
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+
+    let out = child.wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    let ok = serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .map(|v| v["is_error"] != true && v["subtype"] == "success")
+        .unwrap_or(false);
+
+    let detail = if ok {
+        "요청이 정상 처리되었습니다.".to_string()
+    } else {
+        let raw = if stderr.trim().is_empty() { stdout } else { stderr };
+        format!(
+            "요청이 처리되지 않았습니다. 터미널에서 `claude` 를 실행해 로그인했는지 \
+             확인해 주세요.\n{}",
+            raw.trim().chars().take(400).collect::<String>()
+        )
+    };
+
+    Ok(Readiness { path: cli.display().to_string(), version, logged_in: ok, detail })
 }
 
 /// claude 가 로그인되어 있는지 가볍게 확인한다.

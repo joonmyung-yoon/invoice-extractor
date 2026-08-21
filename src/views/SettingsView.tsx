@@ -11,6 +11,7 @@ interface Props {
 export function SettingsView({ master, onMaster }: Props) {
   const [claude, setClaude] = useState<string>('확인 중…')
   const [claudePath, setClaudePath] = useState('')
+  const [ready, setReady] = useState<api.ClaudeReadiness | null>(null)
   const [email, setEmail] = useState<string | null>(null)
   const [sheetUrl, setSheetUrl] = useState('')
   const [dir, setDir] = useState('')
@@ -73,6 +74,47 @@ export function SettingsView({ master, onMaster }: Props) {
       <div className="panel">
         <h3>Claude Code</h3>
         <div className="mono small" style={{ marginBottom: 10 }}>{claude}</div>
+        {ready && (
+          <div className={`alert ${ready.loggedIn ? 'ok' : 'warn'}`} style={{ whiteSpace: 'pre-wrap' }}>
+            <b>
+              {ready.loggedIn
+                ? '정상입니다 — 설치되어 있고 로그인도 되어 있습니다.'
+                : '설치는 되어 있는데 로그인이 안 되어 있습니다.'}
+            </b>
+            <div className="small" style={{ marginTop: 4 }}>
+              {ready.version} · {ready.path}
+            </div>
+            {!ready.loggedIn && (
+              <div className="small" style={{ marginTop: 6 }}>
+                터미널을 열고 <code className="mono">claude</code> 를 실행해 로그인한 뒤 다시
+                확인해 주세요. 로그인하지 않으면 추출이 실패합니다.
+                <div className="muted" style={{ marginTop: 4 }}>{ready.detail}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="row" style={{ marginBottom: 10 }}>
+          <button
+            disabled={!!busy}
+            title="claude 를 다시 찾고, 실제 요청을 한 번 보내 로그인 여부까지 확인합니다."
+            onClick={() =>
+              run('rescan', async () => {
+                setReady(null)
+                const r = await api.claudeRescan()
+                setReady(r)
+                setClaude(`${r.version} · ${r.path}`)
+                await api.getSetting('claude_path').then((v) => setClaudePath(v ?? ''))
+              })
+            }
+          >
+            {busy === 'rescan' ? '확인 중… (몇 초 걸립니다)' : 'Claude Code 다시 찾기 · 로그인 확인'}
+          </button>
+          <span className="muted small">
+            Claude Code 를 다시 설치했거나 추출이 실패할 때 눌러 보세요
+          </span>
+        </div>
+
         <div className="field">
           <label>실행 파일 경로 (자동으로 못 찾을 때만 입력)</label>
           <div className="row">

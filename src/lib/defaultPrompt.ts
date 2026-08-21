@@ -101,7 +101,11 @@ If the document and a table disagree about something the document actually state
 ## Output
 
 **Reply with the JSON object and nothing else** — no explanation before or after, no code
-fences. Do not write it to a file; the reply itself is the result.
+fences. The reply itself is the result.
+
+Also try to save the same JSON to \`extracted.json\` in the current directory. That copy is
+only a safety net in case the app is force-quit before it can read your reply — **if the write
+is refused, ignore it and reply anyway.** A refused write is not a failure.
 
 Shape:
 
