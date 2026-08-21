@@ -48,6 +48,40 @@ pub struct RunOutcome {
     pub elapsed_ms: u128,
 }
 
+/// 실패했을 때 왜 실패했는지 알아내기 위해 스트림에서 모아 두는 것들.
+///
+/// stderr 만 보고 있으면 claude 가 정상 종료한 실패(예: 파일 쓰기 거부)를
+/// 전혀 알 수 없다. 실제 사유는 stdout 이벤트에 들어 있다.
+#[derive(Default)]
+struct Diagnostics {
+    /// 도구 사용이 거부된 경우 (도구 이름, 사유)
+    denials: Vec<(String, String)>,
+    /// claude 가 마지막으로 한 말
+    last_text: String,
+    /// 종료 결과 (subtype)
+    result: Option<String>,
+    /// claude 의 최종 응답. 여기에 추출 결과 JSON 이 들어 있다.
+    final_text: String,
+}
+
+/// 모델 응답에서 JSON 부분만 꺼낸다.
+///
+/// 앞뒤에 설명을 붙이거나 ```json 으로 감싸는 경우가 있어 그대로 파싱하면 실패한다.
+fn extract_json(text: &str) -> Option<String> {
+    let t = text.trim();
+    if t.starts_with('{') && t.ends_with('}') {
+        return Some(t.to_string());
+    }
+    // 코드펜스 안이나 설명 뒤에 붙은 경우 가장 바깥 중괄호 범위를 찾는다.
+    let start = t.find('{')?;
+    let end = t.rfind('}')?;
+    if end > start {
+        Some(t[start..=end].to_string())
+    } else {
+        None
+    }
+}
+
 /// 추출 도중 화면에 보낼 진행 상황.
 ///
 /// 예전에는 "시작"과 "완료" 두 상태뿐이라 몇 분 동안 아무것도 알 수 없었다.
@@ -167,9 +201,13 @@ pub fn run_extraction(
         .current_dir(workdir)
         .arg("-p")
         .arg(prompt)
-        // 작업 폴더 안에서 이미지 읽고 결과 쓰는 것만 허용한다.
+        // 페이지 이미지를 읽는 것만 허용한다.
+        //
+        // 예전에는 결과를 파일로 쓰게 했는데, PC 에 따라 Claude Code 의 안전 검사가
+        // 쓰기를 거부해(safetyCheck) 추출이 통째로 실패했다. 결과를 응답으로 직접
+        // 받으면 쓰기 권한 자체가 필요 없어 그 실패가 원천적으로 사라진다.
         .arg("--allowedTools")
-        .arg("Read,Write")
+        .arg("Read")
         .arg("--permission-mode")
         .arg("acceptEdits")
         // 사용자 환경의 MCP 서버를 끌고 들어오지 않는다 (외부 유출 차단).
@@ -193,6 +231,8 @@ pub fn run_extraction(
     // 프로세스를 기다리는 동안에도 계속 비워 줘야 한다.
     let stdout = child.stdout.take().expect("stdout 파이프");
     let job = job_id.to_string();
+    let diag = std::sync::Arc::new(std::sync::Mutex::new(Diagnostics::default()));
+    let diag_w = diag.clone();
     let reader = std::thread::spawn(move || {
         let mut pages_read = 0usize;
         let mut seen = std::collections::HashSet::new();
@@ -206,6 +246,28 @@ pub fn run_extraction(
 
             let mut changed = false;
             let mut current_page = None;
+
+            // 실패 원인이 될 만한 것들을 모아 둔다.
+            match ev["type"].as_str() {
+                Some("system") if ev["subtype"] == "permission_denied" => {
+                    let tool = ev["tool_name"].as_str().unwrap_or("?").to_string();
+                    let why = ev["decision_reason_type"]
+                        .as_str()
+                        .or_else(|| ev["reason"].as_str())
+                        .unwrap_or("사유 없음")
+                        .to_string();
+                    diag_w.lock().unwrap().denials.push((tool, why));
+                }
+                Some("result") => {
+                    let mut d = diag_w.lock().unwrap();
+                    d.result = Some(ev["subtype"].as_str().unwrap_or("").to_string());
+                    // 최종 응답이 곧 추출 결과다.
+                    if let Some(t) = ev["result"].as_str() {
+                        d.final_text = t.to_string();
+                    }
+                }
+                _ => {}
+            }
 
             if ev["type"] == "assistant" {
                 if let Some(content) = ev["message"]["content"].as_array() {
@@ -232,6 +294,8 @@ pub fn run_extraction(
                                 let t = c["text"].as_str().unwrap_or("").trim();
                                 if !t.is_empty() {
                                     last_text = t.chars().take(80).collect();
+                                    diag_w.lock().unwrap().last_text =
+                                        t.chars().take(600).collect();
                                 }
                             }
                             _ => {}
@@ -288,11 +352,52 @@ pub fn run_extraction(
         let _ = e.read_to_string(&mut stderr);
     }
 
+    let d = diag.lock().unwrap();
+
+    // 응답으로 받은 JSON 을 먼저 쓴다. 파일은 예전 방식과의 호환용 대비책이다.
+    if let Some(json) = extract_json(&d.final_text) {
+        if serde_json::from_str::<serde_json::Value>(&json).is_ok() {
+            return Ok(RunOutcome {
+                extracted_json: json,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
+    }
+
     if !out_path.is_file() {
-        return Err(anyhow!(
-            "extracted.json 이 생성되지 않았습니다.\nstderr: {}",
-            stderr.chars().take(2000).collect::<String>()
-        ));
+        let mut msg = String::from("추출 결과 파일이 만들어지지 않았습니다.\n");
+
+        if !d.denials.is_empty() {
+            msg.push_str("\n원인: Claude Code 가 도구 사용을 거부당했습니다.\n");
+            for (tool, why) in &d.denials {
+                msg.push_str(&format!("  · {tool} 거부됨 ({why})\n"));
+            }
+            msg.push_str(
+                "\n그 PC 의 Claude Code 권한 설정 때문입니다. 터미널에서 아래를 실행해\n                 한 번 허용해 두면 해결됩니다:\n                 \n  claude --version\n                 \n그래도 안 되면 ~/.claude/settings.json 의 permissions 설정을 확인해 주세요.\n",
+            );
+        } else if !d.final_text.is_empty() {
+            msg.push_str(&format!(
+                "\nClaude Code 의 응답에서 JSON 을 찾지 못했습니다:\n{}\n",
+                d.final_text.chars().take(600).collect::<String>()
+            ));
+        } else if !d.last_text.is_empty() {
+            msg.push_str(&format!("\nClaude Code 의 마지막 응답:\n{}\n", d.last_text));
+        }
+
+        if let Some(r) = &d.result {
+            if r != "success" {
+                msg.push_str(&format!("\n종료 상태: {r}\n"));
+            }
+        }
+
+        if !stderr.trim().is_empty() {
+            msg.push_str(&format!(
+                "\nstderr:\n{}",
+                stderr.chars().take(1500).collect::<String>()
+            ));
+        }
+
+        return Err(anyhow!(msg));
     }
 
     Ok(RunOutcome {

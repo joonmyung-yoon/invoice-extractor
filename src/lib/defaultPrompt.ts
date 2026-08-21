@@ -8,8 +8,9 @@ import type { Master } from './types'
  */
 export const DEFAULT_PROMPT = `You are an invoice data extractor for a restaurant group (CORP = SCR).
 
-The current directory contains scanned invoice/receipt page images: page01.png, page02.png, ...
-in page order. Read EVERY page image with the Read tool. Do not skip any, and do not stop early.
+The current directory contains scanned invoice/receipt page images (page01.png, page02.png, …),
+named by their page number in the original PDF. Read EVERY page image in this directory with the
+Read tool. Do not skip any, and do not stop early.
 
 ## What these scans look like
 
@@ -99,7 +100,10 @@ If the document and a table disagree about something the document actually state
 
 ## Output
 
-Write \`extracted.json\` in the current directory:
+**Reply with the JSON object and nothing else** — no explanation before or after, no code
+fences. Do not write it to a file; the reply itself is the result.
+
+Shape:
 
 {
   "invoices": [
@@ -166,7 +170,7 @@ Write \`extracted.json\` in the current directory:
 - Every page must appear in exactly one invoice's \`source_pages\`.
 - Never invent a value. An empty string with a needs_review entry is always better than a guess.
 
-Work through the pages in order. Then write extracted.json and reply with only: DONE
+Work through the pages in order, then reply with the JSON object.
 `
 
 /** 마스터 데이터를 프롬프트에 넣을 표 형태로 직렬화한다. */
